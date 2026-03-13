@@ -1,0 +1,128 @@
+@startuml WanderAI_Sequence_Flow
+title WanderAI — Request Sequence Flow
+
+skinparam backgroundColor #0d1117
+skinparam defaultFontColor #c9d1d9
+skinparam defaultFontSize 11
+skinparam defaultFontName "Helvetica"
+skinparam sequenceArrowThickness 1.5
+skinparam roundcorner 8
+skinparam shadowing false
+
+skinparam participant {
+  BackgroundColor #21262d
+  BorderColor #388bfd
+  FontColor #c9d1d9
+}
+
+skinparam actor {
+  BackgroundColor #21262d
+  BorderColor #58a6ff
+  FontColor #c9d1d9
+}
+
+skinparam note {
+  BackgroundColor #161b22
+  BorderColor #30363d
+  FontColor #8b949e
+}
+
+skinparam sequence {
+  LifeLineBorderColor #30363d
+  GroupBackgroundColor #161b22
+  GroupBorderColor #30363d
+  GroupFontColor #79c0ff
+  DividerBackgroundColor #161b22
+  DividerBorderColor #30363d
+}
+
+actor       "User"                    as User
+participant "React Frontend"          as FE
+participant "FastAPI\n/api/chat"      as ChatAPI
+participant "Conv. Agent\n(LangChain)" as ConvAgent
+participant "Claude API\n(Sonnet)"    as Claude
+participant "FastAPI\n/api/plan"      as PlanAPI
+participant "Plan Agent\n(LangChain)" as PlanAgent
+participant "ChromaDB"                as VDB
+participant "Google Maps\nAPI"        as GMaps
+participant "Mapbox GL JS"            as Mapbox
+
+== Phase 1 · Onboarding ==
+
+User -> FE : "chill spot, 3 friends, CBD, $40pp"
+FE -> ChatAPI : POST /api/chat\n{message, session_id}
+ChatAPI -> ConvAgent : invoke(message, history=[])
+ConvAgent -> Claude : generate_response(system_prompt, message)
+Claude --> ConvAgent : "What kind of vibe — lively or relaxed?"
+ConvAgent --> ChatAPI : streamed text
+ChatAPI --> FE : SSE chunks
+FE --> User : show question (typewriter effect)
+
+note over FE, ConvAgent
+  Repeat 2–3 turns until agent
+  has: vibe · budget · location
+  group size · duration
+end note
+
+loop 2–3 clarifying turns
+  User -> FE : answer
+  FE -> ChatAPI : POST /api/chat
+  ChatAPI -> ConvAgent : invoke(message, history)
+  ConvAgent -> Claude : tool_use: should_generate_plan?
+  Claude --> ConvAgent : [continue Q&A or trigger plan]
+  ConvAgent --> FE : next question or "searching..."
+end
+
+== Phase 2 · Retrieval ==
+
+ConvAgent -> Claude : build_preference_brief(full_history)
+Claude --> ConvAgent : preference_brief JSON\n{vibe, budget, location, group_size, duration}
+
+FE --> User : ✦ "Searching social platforms for hidden gems..."
+
+ConvAgent -> VDB : similarity_search(\n  embed(preference_brief), k=20\n)
+VDB --> ConvAgent : top 20 venues\n(name, description, source_url,\nview_count, lat, lng)
+
+== Phase 3 · Enrichment ==
+
+ConvAgent -> GMaps : get_place_details(venue_names[])
+note right of GMaps
+  Batch lookup:
+  hours · address · phone
+  rating · price_level
+end note
+GMaps --> ConvAgent : operational details[]
+
+== Phase 4 · Plan Generation ==
+
+ConvAgent -> PlanAPI : POST /api/plan\n{preference_brief, candidates[]}
+PlanAPI -> PlanAgent : invoke(brief, candidates)
+PlanAgent -> Claude : synthesise_plan(\n  candidates, brief,\n  tool: format_plan\n)
+Claude --> PlanAgent : structured itinerary\n(Pydantic: PlanOutput)
+
+note over PlanAgent, Claude
+  PlanOutput schema:
+  • title, tagline
+  • stops[]: {time, venue_name, description,
+    category, address, source_url,
+    view_count, lat, lng, tip}
+  • total_duration, budget_estimate
+end note
+
+PlanAgent --> PlanAPI : PlanOutput JSON
+PlanAPI --> FE : itinerary response
+
+== Phase 5 · Render ==
+
+FE --> User : render Plan Cards\n(venue name · time · description\nsocial proof link · view count)
+
+FE -> Mapbox : addMarkers(stops[].lat_lng)
+FE -> Mapbox : addRoute(stops[].coordinates)
+Mapbox --> FE : rendered map with\nnumbered markers + dashed route
+
+FE --> User : interactive map visible
+
+User -> FE : click venue card
+FE --> User : open source_url\n(TikTok / Instagram / YouTube)
+
+@enduml
