@@ -462,6 +462,111 @@ html:not(.dark) .floating-pill {
   transform: translate(-50%, -50%) scale(1.2);
 }
 
+/* ── Entry animation ──────────────────────────────────────── */
+
+/* Welcome overlay */
+@keyframes intro-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes intro-exit {
+  to { opacity: 0; }
+}
+@keyframes intro-name-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes intro-sub-in {
+  from { opacity: 0; }
+  to   { opacity: 0.5; }
+}
+@keyframes intro-glow-breathe {
+  0%, 100% { opacity: 0.3; transform: scale(0.95); }
+  50%      { opacity: 0.6; transform: scale(1.05); }
+}
+
+.intro-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  background: oklch(0.99 0 0);
+  animation: intro-fade-in 0.4s ease-out both;
+}
+.dark .intro-overlay {
+  background: oklch(0.08 0.01 285);
+}
+.intro-overlay--exit {
+  animation: intro-exit 0.7s ease-in-out forwards;
+}
+.intro-overlay__glow {
+  position: absolute;
+  width: 280px;
+  height: 280px;
+  border-radius: 50%;
+  background: radial-gradient(circle, oklch(0.65 0.1 255 / 0.08), transparent 70%);
+  pointer-events: none;
+  animation: intro-glow-breathe 2.5s ease-in-out infinite;
+}
+.dark .intro-overlay__glow {
+  background: radial-gradient(circle, oklch(0.55 0.18 255 / 0.12), transparent 70%);
+}
+.intro-overlay__agent {
+  animation: intro-name-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.2s both;
+}
+.intro-overlay__icon {
+  width: 56px;
+  height: 56px;
+  filter: drop-shadow(0 4px 12px oklch(0 0 0 / 0.06));
+}
+.intro-overlay__name {
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: oklch(0.15 0.01 260);
+  animation: intro-name-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.4s both;
+}
+.dark .intro-overlay__name {
+  color: oklch(0.95 0 0);
+}
+.intro-overlay__subtitle {
+  font-size: 0.75rem;
+  color: oklch(0.5 0 0);
+  letter-spacing: 0.12em;
+  animation: intro-sub-in 0.5s ease-out 0.7s both;
+}
+
+/* Map */
+@keyframes intro-map-reveal {
+  from { opacity: 0; transform: scale(1.03); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.intro-map-hidden { opacity: 0; }
+.intro-map { animation: intro-map-reveal 0.8s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+/* Pill bar */
+@keyframes intro-pill-drop {
+  from { opacity: 0; transform: translate(-50%, -14px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+.intro-pill-hidden { opacity: 0; pointer-events: none; }
+.intro-pill-in     { animation: intro-pill-drop 0.45s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+/* Chat typewriter cursor blink */
+.intro-typewriter::after {
+  content: "▎";
+  animation: intro-cursor-blink 0.6s step-end infinite;
+  color: var(--color-primary);
+}
+@keyframes intro-cursor-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0; }
+}
+
 /* ── responsive ────────────────────────────────────────────── */
 @media (max-width: 1100px) {
   .glass-panel { --panel-w: min(340px, 38vw); }

@@ -1,42 +1,76 @@
-import venuesData from "@/venues.json";
-import type { SearchResult, Spot, SpotKind, Venue } from "@/lib/types";
+import rawVenues from "@/melbourne_videos_locations.json";
+import type { SearchResult, Spot, SpotKind, Venue, VenueCategory, VenueRaw } from "@/lib/types";
+
+/* ── Normalise raw Google Places category string into a UI category ── */
+export function normaliseCategory(raw: string): VenueCategory {
+  const r = raw.toLowerCase();
+  if (r.includes("restaurant") || r.includes("bakery") || r.includes("market") || (r.includes("food") && !r.includes("shopping"))) return "restaurant";
+  if (r === "coffee") return "cafe";
+  if (r === "bar") return "bar";
+  if (r.includes("clothing") || r.includes("shopping") || r.includes("beauty") || r.includes("home_goods")) return "shopping";
+  if (r.includes("attraction") || r.includes("route") || r.includes("natural_feature") || r.includes("stadium") || r.includes("lodging") || r.includes("train_station")) return "attraction";
+  return "other";
+}
+
+/** Hydrate raw JSON entries into full Venue objects with stable, unique ids.
+ *  Deduplicates by google_place_id — keeps the entry with the longer description. */
+export function hydrateVenues(raw: VenueRaw[]): Venue[] {
+  const seen = new Map<string, Venue>();
+  for (let i = 0; i < raw.length; i++) {
+    const v = raw[i];
+    const id = v.google_place_id ?? `venue_${i}`;
+    const venue: Venue = { ...v, id, uiCategory: normaliseCategory(v.category) };
+    const existing = seen.get(id);
+    if (!existing || v.description.length > existing.description.length) {
+      seen.set(id, venue);
+    }
+  }
+  return Array.from(seen.values());
+}
+
+/** Server-side only — used by API routes and the AI planner. NOT imported by client code. */
+export const VENUES: Venue[] = hydrateVenues(rawVenues as VenueRaw[]);
 
 /** Convert a Venue into the Spot shape the planner expects */
 function venueToSpot(v: Venue): Spot {
-  const kindMap: Record<string, SpotKind> = { restaurant: "food", cafe: "food", bar: "food" };
+  const kindMap: Record<VenueCategory, SpotKind> = {
+    restaurant: "food", cafe: "food", bar: "food",
+    attraction: "lookout", shopping: "fashion", other: "food",
+  };
   const tags: string[] = (() => { try { return JSON.parse(v.tags); } catch { return []; } })();
+  const vibe = v.vibe ?? "";
 
   return {
     id: v.id,
     name: v.name,
-    kind: kindMap[v.category] ?? "food",
-    area: v.suburb,
-    suburb: v.suburb,
+    kind: kindMap[v.uiCategory],
+    area: v.suburb !== "unknown" ? v.suburb : v.city,
+    suburb: v.suburb !== "unknown" ? v.suburb : v.city,
     city: v.city,
-    neighbourhood: v.suburb,
-    categories: [v.category],
+    neighbourhood: v.suburb !== "unknown" ? v.suburb : v.city,
+    categories: [v.uiCategory],
     vibeTags: tags,
     description: v.description,
     whyItTrends: v.description,
     address: v.address,
     coordinates: { lat: v.lat, lng: v.lng },
-    priceBand: v.price_level <= 1 ? "$" : v.price_level === 2 ? "$$" : "$$$",
-    idealVisitMinutes: v.category === "cafe" ? 45 : v.category === "bar" ? 60 : 75,
-    bestFor: [v.vibe, v.category],
-    visitWindows: v.category === "cafe" ? ["morning", "afternoon"] : ["afternoon", "evening"],
+    priceBand: v.price_level == null ? null : v.price_level <= 1 ? "$" : v.price_level === 2 ? "$$" : "$$$",
+    idealVisitMinutes: v.uiCategory === "cafe" ? 45 : v.uiCategory === "bar" ? 60 : v.uiCategory === "attraction" ? 60 : 75,
+    bestFor: [vibe, v.uiCategory].filter(Boolean),
+    visitWindows: v.uiCategory === "cafe" ? ["morning", "afternoon"] : v.uiCategory === "attraction" ? ["morning", "afternoon", "evening"] : ["afternoon", "evening"],
     signals: {
-      food: v.category === "restaurant" || v.category === "cafe" ? 0.8 : 0.3,
-      scenic: v.vibe === "romantic" ? 0.7 : 0.3,
-      fashion: 0,
-      hiddenGem: tags.includes("hidden-gem") ? 0.8 : 0.3,
-      viral: tags.includes("viral") ? 0.8 : 0.3,
+      food: v.uiCategory === "restaurant" || v.uiCategory === "cafe" ? 0.8 : 0.3,
+      scenic: v.uiCategory === "attraction" || vibe === "scenic" ? 0.8 : vibe === "romantic" ? 0.7 : 0.3,
+      fashion: v.uiCategory === "shopping" ? 0.8 : 0,
+      hiddenGem: tags.includes("hidden-gem") || tags.includes("hidden gem") ? 0.8 : 0.3,
+      viral: tags.includes("viral") || (v.review_count != null && v.review_count > 5000) ? 0.8 : 0.3,
     },
-    socialProof: { mentions: 10, creatorCount: 3, lastScrapedAt: "2025-01-01" },
+    socialProof: { mentions: v.review_count ?? 0, creatorCount: 3, lastScrapedAt: "2025-01-01" },
     sourcePosts: [],
   };
 }
 
-const spots: Spot[] = (venuesData as Venue[]).map(venueToSpot);
+const spots: Spot[] = VENUES.map(venueToSpot);
 
 const KIND_KEYWORDS: Record<SpotKind, string[]> = {
   food: ["food", "eat", "brunch", "coffee", "cafe", "dinner", "lunch", "dessert", "restaurant", "bar"],

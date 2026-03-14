@@ -1,8 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useState } from "react";
-import { TikTokEmbed, YouTubeEmbed } from "react-social-media-embed";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useTheme } from "next-themes";
@@ -25,7 +24,6 @@ import {
   Sun,
   Train,
   UtensilsCrossed,
-  Waypoints,
   Wine
 } from "lucide-react";
 
@@ -49,8 +47,8 @@ import {
   TooltipProvider,
   TooltipTrigger
 } from "@/components/ui/tooltip";
+import { AgentIcon } from "@/components/agent-icon";
 import { cn } from "@/lib/utils";
-import venuesData from "@/venues.json";
 import type {
   ItineraryResponse,
   PlannedStop,
@@ -59,12 +57,22 @@ import type {
   VenueCategory
 } from "@/lib/types";
 
+/* ── Lazy-loaded heavy components ─────────────────────────── */
 const RouteMap = dynamic(
   () => import("@/components/route-map").then((mod) => mod.RouteMap),
   { ssr: false, loading: () => <div className="fallback-map" /> }
 );
 
-const VENUES = venuesData as Venue[];
+const LazyTikTokEmbed = dynamic(
+  () => import("react-social-media-embed").then((mod) => mod.TikTokEmbed),
+  { ssr: false, loading: () => <div className="h-[400px] animate-pulse rounded-lg bg-muted" /> }
+);
+
+const LazyYouTubeEmbed = dynamic(
+  () => import("react-social-media-embed").then((mod) => mod.YouTubeEmbed),
+  { ssr: false, loading: () => <div className="h-[300px] animate-pulse rounded-lg bg-muted" /> }
+);
+
 const HAS_GOOGLE_MAPS = Boolean(process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY);
 
 const CATEGORY_ALL = "all" as const;
@@ -72,9 +80,10 @@ type CategoryFilter = VenueCategory | typeof CATEGORY_ALL;
 
 const CATEGORIES: { value: CategoryFilter; label: string; icon: React.ReactNode }[] = [
   { value: "all", label: "All", icon: <MapPin className="size-3" /> },
-  { value: "restaurant", label: "Restaurants", icon: <UtensilsCrossed className="size-3" /> },
+  { value: "restaurant", label: "Food", icon: <UtensilsCrossed className="size-3" /> },
   { value: "cafe", label: "Cafes", icon: <Coffee className="size-3" /> },
   { value: "bar", label: "Bars", icon: <Wine className="size-3" /> },
+  { value: "attraction", label: "Attractions", icon: <MapPin className="size-3" /> },
 ];
 
 const SUGGESTIONS = [
@@ -82,6 +91,19 @@ const SUGGESTIONS = [
   "southside brunch then sunset for a date",
   "CBD fashion and food route for a visitor",
   "lunch and fashion stores around Fitzroy"
+];
+
+const PLACEHOLDERS = [
+  "Plan me a date night...",
+  "Find somewhere cozy for brunch...",
+  "What's good in Fitzroy?",
+  "I want a hidden gem...",
+  "Surprise me with a food crawl...",
+  "Where should I take someone new to Melbourne?",
+  "Something lowkey and vibes...",
+  "Best sunset spot for tonight?",
+  "Coffee then shopping, go...",
+  "Build me the perfect Saturday...",
 ];
 
 const WELCOME_PROMPTS = [
@@ -131,7 +153,8 @@ function parseTags(raw: string): string[] {
   try { return JSON.parse(raw); } catch { return []; }
 }
 
-function priceLabel(level: number): string {
+function priceLabel(level: number | null): string {
+  if (level == null || level <= 0) return "";
   return "$".repeat(level);
 }
 
@@ -147,8 +170,8 @@ function VenueCard({
 }) {
   const tags = parseTags(venue.tags);
   const categoryIcon =
-    venue.category === "restaurant" ? <UtensilsCrossed className="size-3" /> :
-    venue.category === "cafe" ? <Coffee className="size-3" /> :
+    venue.uiCategory === "restaurant" ? <UtensilsCrossed className="size-3" /> :
+    venue.uiCategory === "cafe" ? <Coffee className="size-3" /> :
     <Wine className="size-3" />;
 
   return (
@@ -167,9 +190,9 @@ function VenueCard({
           <h3 className="text-sm font-semibold truncate">{venue.name}</h3>
           <p className="text-[0.65rem] text-muted-foreground flex items-center gap-1">
             {categoryIcon}
-            <span className="capitalize">{venue.category}</span>
+            <span className="capitalize">{venue.uiCategory}</span>
             <span className="opacity-40">·</span>
-            {venue.suburb}
+            {venue.suburb !== "unknown" ? venue.suburb : venue.city}
             <span className="opacity-40">·</span>
             {priceLabel(venue.price_level)}
           </p>
@@ -191,6 +214,59 @@ function VenueCard({
         ))}
       </div>
     </button>
+  );
+}
+
+/* ── Windowed venue list (renders in batches to avoid jank) ── */
+const VENUE_PAGE_SIZE = 20;
+
+function VenueList({
+  venues,
+  selectedVenueId,
+  onSelect,
+}: {
+  venues: Venue[];
+  selectedVenueId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  const [visible, setVisible] = useState(VENUE_PAGE_SIZE);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  // Reset visible count when the list changes (filter/search)
+  useEffect(() => { setVisible(VENUE_PAGE_SIZE); }, [venues]);
+
+  // IntersectionObserver to load more when scrolling near the bottom
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setVisible((prev) => Math.min(prev + VENUE_PAGE_SIZE, venues.length));
+        }
+      },
+      { rootMargin: "200px" }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [venues.length]);
+
+  return (
+    <div className="space-y-2.5">
+      {venues.slice(0, visible).map((venue) => (
+        <VenueCard
+          key={venue.id}
+          venue={venue}
+          active={selectedVenueId === venue.id}
+          onSelect={onSelect}
+        />
+      ))}
+      {visible < venues.length && (
+        <div ref={sentinelRef} className="flex justify-center py-2">
+          <Loader2 className="size-4 animate-spin text-muted-foreground" />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -248,7 +324,7 @@ function SocialEmbeds({ links }: { links: SocialLink[] }) {
         {embeddable.map((link) => (
           <div key={link.url} className="rounded-lg overflow-hidden">
             {link.platform === "tiktok" ? (
-              <TikTokEmbed url={link.url} width="100%" />
+              <LazyTikTokEmbed url={link.url} width="100%" />
             ) : link.platform === "instagram" && link.embedUrl ? (
               <iframe
                 src={link.embedUrl}
@@ -258,7 +334,7 @@ function SocialEmbeds({ links }: { links: SocialLink[] }) {
                 loading="lazy"
               />
             ) : link.platform === "youtube" ? (
-              <YouTubeEmbed url={link.url} width="100%" />
+              <LazyYouTubeEmbed url={link.url} width="100%" />
             ) : (
               <a
                 href={link.url}
@@ -282,11 +358,17 @@ const CATEGORY_COLORS: Record<string, string> = {
   restaurant: "oklch(0.7 0.18 50)",
   cafe: "oklch(0.65 0.18 310)",
   bar: "oklch(0.65 0.16 255)",
+  attraction: "oklch(0.65 0.16 150)",
+  shopping: "oklch(0.65 0.16 340)",
+  other: "oklch(0.6 0.12 230)",
 };
 const CATEGORY_ICON: Record<string, React.ReactNode> = {
   restaurant: <UtensilsCrossed className="size-5" />,
   cafe: <Coffee className="size-5" />,
   bar: <Wine className="size-5" />,
+  attraction: <MapPin className="size-5" />,
+  shopping: <MapPin className="size-5" />,
+  other: <MapPin className="size-5" />,
 };
 
 function VenueDetail({
@@ -299,8 +381,8 @@ function VenueDetail({
   const tags = parseTags(venue.tags);
   const hours: string[] = (() => { try { return JSON.parse(venue.opening_hours); } catch { return []; } })();
   const socialLinks = parseSocialUrls(venue.source_urls);
-  const accentColor = CATEGORY_COLORS[venue.category] ?? "oklch(0.65 0.16 255)";
-  const icon = CATEGORY_ICON[venue.category] ?? <MapPin className="size-5" />;
+  const accentColor = CATEGORY_COLORS[venue.uiCategory] ?? "oklch(0.65 0.16 255)";
+  const icon = CATEGORY_ICON[venue.uiCategory] ?? <MapPin className="size-5" />;
 
   return (
     <div className="venue-detail rounded-2xl overflow-hidden">
@@ -317,8 +399,8 @@ function VenueDetail({
             <div>
               <h3 className="text-sm font-bold leading-tight">{venue.name}</h3>
               <p className="text-[0.65rem] text-muted-foreground mt-0.5">
-                <span className="capitalize">{venue.category}</span>
-                {" · "}{venue.suburb}{" · "}{priceLabel(venue.price_level)}
+                <span className="capitalize">{venue.uiCategory}</span>
+                {" · "}{venue.suburb !== "unknown" ? venue.suburb : venue.city}{" · "}{priceLabel(venue.price_level)}
               </p>
             </div>
           </div>
@@ -357,7 +439,7 @@ function VenueDetail({
         <div className="flex items-center gap-3 text-[0.6rem] text-muted-foreground/70">
           <span className="flex items-center gap-1">
             <MapPin className="size-2.5" />
-            {venue.suburb}
+            {venue.suburb !== "unknown" ? venue.suburb : venue.city}
           </span>
           {hours.length > 0 && (
             <details className="group inline">
@@ -387,7 +469,7 @@ function VenueDetail({
           )}
           <Button size="sm" className="text-[0.65rem] flex-1 h-7 rounded-full" asChild>
             <a
-              href={`https://www.google.com/maps/search/?api=1&query=${venue.lat},${venue.lng}`}
+              href={venue.google_maps_url ?? `https://www.google.com/maps/search/?api=1&query=${venue.lat},${venue.lng}`}
               target="_blank"
               rel="noreferrer"
             >
@@ -591,35 +673,76 @@ const chatTransport = new DefaultChatTransport({ api: "/api/chat" });
 
 /* ── Main shell ────────────────────────────────────────────── */
 export function PlannerShell() {
+  const [venues, setVenues] = useState<Venue[]>([]);
   const [activeStopId, setActiveStopId] = useState<string | null>(null);
   const [welcomeMsg] = useState(getRandomWelcome);
+  const [placeholder] = useState(() => PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)]);
   const [input, setInput] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
   const [venueSearch, setVenueSearch] = useState("");
   const [selectedVenueId, setSelectedVenueId] = useState<string | null>(null);
-  const [leftOpen, setLeftOpen] = useState(true);
-  const [rightOpen, setRightOpen] = useState(true);
+  const [leftOpen, setLeftOpen] = useState(false);
+  const [rightOpen, setRightOpen] = useState(false);
   const { resolvedTheme } = useTheme();
+  const [introPhase, setIntroPhase] = useState<
+    "welcome" | "map" | "chat" | "typing" | "done"
+  >("welcome");
+  const [typedChars, setTypedChars] = useState(0);
+
+  /* Lazy-load venues from API instead of bundling 283KB JSON into client */
+  useEffect(() => {
+    fetch("/api/venues")
+      .then((r) => r.json())
+      .then((data: Venue[]) => setVenues(data))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const t1 = setTimeout(() => setIntroPhase("map"), 2000);
+    const t2 = setTimeout(() => { setIntroPhase("chat"); setRightOpen(true); }, 3000);
+    const t3 = setTimeout(() => setIntroPhase("typing"), 3500);
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+  }, []);
+
+  useEffect(() => {
+    if (introPhase !== "typing") return;
+    const len = welcomeMsg.length;
+    const interval = setInterval(() => {
+      setTypedChars((prev) => {
+        if (prev >= len) { clearInterval(interval); return prev; }
+        return prev + 1;
+      });
+    }, 8);
+    return () => clearInterval(interval);
+  }, [introPhase, welcomeMsg]);
+
+  useEffect(() => {
+    if (typedChars > 0 && typedChars >= welcomeMsg.length) {
+      const t = setTimeout(() => { setIntroPhase("done"); setLeftOpen(true); }, 400);
+      return () => clearTimeout(t);
+    }
+  }, [typedChars, welcomeMsg.length]);
 
   const selectedVenue = useMemo(
-    () => selectedVenueId ? VENUES.find((v) => v.id === selectedVenueId) ?? null : null,
-    [selectedVenueId]
+    () => selectedVenueId ? venues.find((v) => v.id === selectedVenueId) ?? null : null,
+    [selectedVenueId, venues]
   );
 
   const filteredVenues = useMemo(() => {
-    let result = VENUES;
-    if (categoryFilter !== "all") result = result.filter((v) => v.category === categoryFilter);
+    let result = venues;
+    if (categoryFilter !== "all") result = result.filter((v) => v.uiCategory === categoryFilter);
     if (venueSearch.trim()) {
       const q = venueSearch.toLowerCase();
       result = result.filter((v) =>
         v.name.toLowerCase().includes(q) ||
         v.suburb.toLowerCase().includes(q) ||
-        v.vibe.toLowerCase().includes(q) ||
+        v.city.toLowerCase().includes(q) ||
+        (v.vibe ?? "").toLowerCase().includes(q) ||
         v.tags.toLowerCase().includes(q)
       );
     }
     return result;
-  }, [categoryFilter, venueSearch]);
+  }, [categoryFilter, venueSearch, venues]);
 
   // v5 useChat — transport-based, sendMessage API
   const { messages, sendMessage, status } = useChat({
@@ -639,7 +762,7 @@ export function PlannerShell() {
   const itinerary = useMemo<ItineraryResponse | null>(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       for (const part of messages[i].parts) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
         const p = part as any;
         if (isBuildRoutePart(p) && p.state === "output-available" && p.output) {
           return p.output as ItineraryResponse;
@@ -653,7 +776,7 @@ export function PlannerShell() {
   const planParams = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       for (const part of messages[i].parts) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
         const p = part as any;
         if (isBuildRoutePart(p) && p.input) {
           return p.input as {
@@ -672,7 +795,7 @@ export function PlannerShell() {
   const isPlanning = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       for (const part of messages[i].parts) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
         const p = part as any;
         if (
           isBuildRoutePart(p) &&
@@ -760,8 +883,19 @@ export function PlannerShell() {
 
   return (
     <main className="shell">
+      {/* welcome overlay */}
+      {(introPhase === "welcome" || introPhase === "map") && (
+        <div className={`intro-overlay${introPhase === "map" ? " intro-overlay--exit" : ""}`}>
+          <div className="intro-overlay__glow" />
+          <div className="intro-overlay__agent">
+            <AgentIcon className="intro-overlay__icon" />
+          </div>
+          <p className="intro-overlay__name">Mappy</p>
+        </div>
+      )}
+
       {/* map */}
-      <div className="map-canvas">
+      <div className={`map-canvas${introPhase === "welcome" ? " intro-map-hidden" : " intro-map"}`}>
         <RouteMap
           stops={itinerary?.stops ?? []}
           previewSpots={itinerary ? itinerary.candidates : []}
@@ -777,16 +911,18 @@ export function PlannerShell() {
       </div>
 
       {/* floating pill menu */}
-      <FloatingPill
-        activeCategory={categoryFilter}
-        onCategoryChange={setCategoryFilter}
-        searchQuery={venueSearch}
-        onSearchChange={setVenueSearch}
-        leftOpen={leftOpen}
-        rightOpen={rightOpen}
-        onToggleLeft={() => setLeftOpen((v) => !v)}
-        onToggleRight={() => setRightOpen((v) => !v)}
-      />
+      <div className={introPhase === "welcome" || introPhase === "map" ? "hidden" : ""}>
+        <FloatingPill
+          activeCategory={categoryFilter}
+          onCategoryChange={setCategoryFilter}
+          searchQuery={venueSearch}
+          onSearchChange={setVenueSearch}
+          leftOpen={leftOpen}
+          rightOpen={rightOpen}
+          onToggleLeft={() => setLeftOpen((v) => !v)}
+          onToggleRight={() => setRightOpen((v) => !v)}
+        />
+      </div>
 
       {/* ── LEFT: workspace ────────────────────────────────── */}
       <aside className={`glass-panel glass-panel--left ${leftOpen ? "" : "glass-panel--collapsed-left"}`}>
@@ -939,7 +1075,7 @@ export function PlannerShell() {
                 <div className="space-y-1.5">
                   <h2 className="text-base font-bold">Building your route</h2>
                   <p className="text-sm text-muted-foreground leading-relaxed max-w-[260px]">
-                    Searching {VENUES.length}+ spots, ranking matches,
+                    Searching {venues.length}+ spots, ranking matches,
                     and projecting the best sequence...
                   </p>
                 </div>
@@ -966,16 +1102,11 @@ export function PlannerShell() {
                     {filteredVenues.length} spots
                   </span>
                 </div>
-                <div className="space-y-2.5">
-                  {filteredVenues.map((venue) => (
-                    <VenueCard
-                      key={venue.id}
-                      venue={venue}
-                      active={selectedVenueId === venue.id}
-                      onSelect={setSelectedVenueId}
-                    />
-                  ))}
-                </div>
+                <VenueList
+                  venues={filteredVenues}
+                  selectedVenueId={selectedVenueId}
+                  onSelect={setSelectedVenueId}
+                />
               </div>
             )}
           </div>
@@ -986,42 +1117,53 @@ export function PlannerShell() {
       <aside className={`glass-panel glass-panel--right flex flex-col ${rightOpen ? "" : "glass-panel--collapsed-right"}`}>
         {/* conversation */}
         <Conversation className="flex-1 min-h-0">
-          <ConversationContent className="gap-4 px-5 py-5">
+          <ConversationContent className="gap-5 px-5 py-5">
             {visibleMessages.map((m) => {
               const isUser = (m.role as string) === "user";
               return isUser ? (
                 <div key={m.id} className="chat-msg flex justify-end">
-                  <div className="max-w-[85%] rounded-2xl rounded-br-md bg-secondary/80 px-4 py-2.5">
-                    <p className="text-sm leading-relaxed text-secondary-foreground">
+                  <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-primary/15 px-3.5 py-2">
+                    <p className="text-[15px] leading-[1.6] text-foreground">
                       {getMessageText(m)}
                     </p>
                   </div>
                 </div>
               ) : (
-                <div key={m.id} className="chat-msg flex items-start gap-2.5">
-                  <div className="shrink-0 mt-1 grid place-items-center size-6 rounded-full bg-primary/15">
-                    <Waypoints className="size-3 text-primary" />
+                <div key={m.id} className="chat-msg flex items-start gap-3">
+                  <div className="shrink-0 mt-0.5 grid place-items-center size-7">
+                    <AgentIcon className="size-6" />
                   </div>
-                  <div className="min-w-0 max-w-[90%] pt-0.5">
-                    <p className="text-sm leading-relaxed text-foreground">
-                      {getMessageText(m)}
-                    </p>
-                  </div>
+                  {m.id === "welcome" && introPhase === "chat" ? (
+                    <div className="flex items-center gap-1.5 h-7 mt-1">
+                      <span className="chat-dot" />
+                      <span className="chat-dot" />
+                      <span className="chat-dot" />
+                    </div>
+                  ) : (
+                    <div className="min-w-0 flex-1">
+                      <p className={cn(
+                        "text-[15px] leading-[1.7] text-foreground",
+                        m.id === "welcome" && introPhase === "typing" && "intro-typewriter"
+                      )}>
+                        {m.id === "welcome" && introPhase === "typing"
+                          ? welcomeMsg.slice(0, typedChars)
+                          : getMessageText(m)}
+                      </p>
+                    </div>
+                  )}
                 </div>
               );
             })}
 
             {isBusy && visibleMessages[visibleMessages.length - 1]?.role !== "assistant" && (
-              <div className="chat-msg flex items-start gap-2.5">
-                <div className="shrink-0 mt-1 grid place-items-center size-6 rounded-full bg-primary/15">
-                  <Waypoints className="size-3 text-primary" />
+              <div className="chat-msg flex items-start gap-3">
+                <div className="shrink-0 mt-0.5 grid place-items-center size-7">
+                  <AgentIcon className="size-6" />
                 </div>
-                <div className="flex items-center gap-2 pt-1 text-sm text-muted-foreground">
-                  <span className="chat-dots flex gap-0.5">
-                    <span className="chat-dot" />
-                    <span className="chat-dot" />
-                    <span className="chat-dot" />
-                  </span>
+                <div className="flex items-center gap-1.5 pt-0.5">
+                  <span className="chat-dot" />
+                  <span className="chat-dot" />
+                  <span className="chat-dot" />
                 </div>
               </div>
             )}
@@ -1032,12 +1174,12 @@ export function PlannerShell() {
         {/* composer */}
         <div className="shrink-0 px-4 pb-4 pt-2 space-y-2.5">
           {messages.length <= 1 && (
-            <div className="flex flex-wrap gap-1.5 px-1">
+            <div className="flex flex-col gap-2 px-1">
               {SUGGESTIONS.map((s, i) => (
                 <button
                   key={s}
                   type="button"
-                  className="chat-suggestion rounded-full border border-border/30 px-3 py-1.5 text-[0.65rem] text-muted-foreground hover:bg-muted/30 hover:text-foreground transition-all duration-200"
+                  className="chat-suggestion text-left rounded-xl border border-border/30 px-4 py-2.5 text-[13px] text-muted-foreground hover:bg-muted/30 hover:text-foreground transition-all duration-200"
                   style={{ animationDelay: `${i * 60}ms` }}
                   onClick={() => {
                     sendMessage({ text: s });
@@ -1054,15 +1196,15 @@ export function PlannerShell() {
               e.preventDefault();
               handleSend();
             }}
-            className="flex items-end gap-2 rounded-2xl border border-border/80 px-4 py-3 transition-colors focus-within:border-border/100"
+            className="composer-box rounded-2xl border-2 border-border/30 bg-muted/10 transition-all focus-within:border-primary/50 focus-within:shadow-[0_0_0_3px_oklch(0.65_0.16_255/0.15)]"
           >
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Message Scout..."
+              placeholder={placeholder}
               rows={1}
               disabled={isBusy}
-              className="flex-1 min-h-[1.4rem] max-h-28 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground/80 outline-none"
+              className="block w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-[15px] text-foreground placeholder:text-muted-foreground/50 outline-none"
               style={{ fieldSizing: "content" } as React.CSSProperties}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
@@ -1071,13 +1213,15 @@ export function PlannerShell() {
                 }
               }}
             />
-            <button
-              type="submit"
-              disabled={isBusy || !input.trim()}
-              className="shrink-0 grid place-items-center size-7 rounded-lg bg-foreground/90 text-background disabled:opacity-20 hover:bg-foreground transition-all duration-150"
-            >
-              <ArrowUpRight className="size-3.5" />
-            </button>
+            <div className="flex items-center justify-end gap-2 px-3 pb-2.5">
+              <button
+                type="submit"
+                disabled={isBusy || !input.trim()}
+                className="shrink-0 grid place-items-center size-7 rounded-full bg-foreground/20 text-foreground disabled:opacity-15 hover:bg-foreground/30 transition-all"
+              >
+                <ArrowUpRight className="size-3.5" />
+              </button>
+            </div>
           </form>
         </div>
       </aside>

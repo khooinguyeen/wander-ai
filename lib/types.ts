@@ -1,21 +1,33 @@
-export type VenueCategory = "bar" | "cafe" | "restaurant";
+export type VenueCategory = "restaurant" | "cafe" | "bar" | "attraction" | "shopping" | "other";
 
-export type Venue = {
-  id: string;
+/** Raw shape coming from melbourne_videos_locations.json */
+export type VenueRaw = {
   name: string;
   description: string;
-  category: VenueCategory;
+  category: string; // raw Google Places category string
   suburb: string;
   city: string;
+  state: string;
+  country: string;
   address: string;
   lat: number;
   lng: number;
-  price_level: number;
-  vibe: string;
+  review_count: number | null;
+  price_level: number | null;
+  vibe: string | null;
   tags: string; // JSON-encoded string array
   opening_hours: string; // JSON-encoded string array
-  website: string;
+  website: string | null;
+  google_maps_url: string | null;
+  google_place_id: string | null;
   source_urls: string; // JSON-encoded string array
+};
+
+export type Venue = VenueRaw & {
+  /** Derived stable id */
+  id: string;
+  /** Normalised UI category */
+  uiCategory: VenueCategory;
 };
 
 export type SpotKind = "food" | "lookout" | "fashion";

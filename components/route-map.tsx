@@ -109,6 +109,14 @@ function DirectionsRenderer({
 function FitBounds({ stops, previewSpots, venues }: { stops: PlannedStop[]; previewSpots: Spot[]; venues: Venue[] }) {
   const map = useMap();
 
+  // Build a stable key from the set of point IDs so we only fitBounds when
+  // the actual points change, not on every selection/re-render.
+  const pointsKey = useMemo(() => {
+    if (stops.length > 0) return stops.map((s) => s.spot.id).join(",");
+    if (venues.length > 0) return venues.map((v) => v.id).join(",");
+    return previewSpots.map((s) => s.id).join(",");
+  }, [stops, previewSpots, venues]);
+
   useEffect(() => {
     if (!map) return;
 
@@ -126,7 +134,8 @@ function FitBounds({ stops, previewSpots, venues }: { stops: PlannedStop[]; prev
       bounds.extend({ lat: p.lat, lng: p.lng });
     }
     map.fitBounds(bounds, { top: 80, bottom: 80, left: 420, right: 420 });
-  }, [map, stops, previewSpots, venues]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, pointsKey]);
 
   return null;
 }
@@ -135,6 +144,9 @@ const VENUE_CATEGORY_COLORS: Record<string, string> = {
   restaurant: "#f97316",
   cafe: "#a855f7",
   bar: "#3b82f6",
+  attraction: "#22c55e",
+  shopping: "#ec4899",
+  other: "#6b7280",
 };
 
 import { UtensilsCrossed, Coffee, Wine, MapPin } from "lucide-react";
@@ -144,6 +156,9 @@ const VENUE_CATEGORY_ICON: Record<string, ReactNode> = {
   restaurant: <UtensilsCrossed size={14} strokeWidth={2.5} color="#fff" />,
   cafe: <Coffee size={14} strokeWidth={2.5} color="#fff" />,
   bar: <Wine size={14} strokeWidth={2.5} color="#fff" />,
+  attraction: <MapPin size={14} strokeWidth={2.5} color="#fff" />,
+  shopping: <MapPin size={14} strokeWidth={2.5} color="#fff" />,
+  other: <MapPin size={14} strokeWidth={2.5} color="#fff" />,
 };
 
 
@@ -200,8 +215,8 @@ function GoogleMapInner({
         : hasVenues
           ? venues.map((venue) => {
               const isSelected = selectedVenueId === venue.id;
-              const color = VENUE_CATEGORY_COLORS[venue.category] ?? "#3b82f6";
-              const icon = VENUE_CATEGORY_ICON[venue.category] ?? <MapPin size={14} strokeWidth={2.5} color="#fff" />;
+              const color = VENUE_CATEGORY_COLORS[venue.uiCategory] ?? "#3b82f6";
+              const icon = VENUE_CATEGORY_ICON[venue.uiCategory] ?? <MapPin size={14} strokeWidth={2.5} color="#fff" />;
               return (
                 <AdvancedMarker
                   key={venue.id}
@@ -217,7 +232,7 @@ function GoogleMapInner({
                       </div>
                       <div className="venue-marker__info">
                         <span className="venue-marker__name">{venue.name}</span>
-                        <span className="venue-marker__sub">{venue.suburb} · {venue.category}</span>
+                        <span className="venue-marker__sub">{venue.suburb !== "unknown" ? venue.suburb : venue.city} · {venue.uiCategory}</span>
                       </div>
                       <div className="venue-marker__arrow" style={{ borderTopColor: color }} />
                     </div>
@@ -332,7 +347,7 @@ function FallbackMap({
                   style={{
                     left: `${pos.x}%`,
                     top: `${pos.y}%`,
-                    background: VENUE_CATEGORY_COLORS[venue.category] ?? "#3b82f6"
+                    background: VENUE_CATEGORY_COLORS[venue.uiCategory] ?? "#3b82f6"
                   }}
                   title={venue.name}
                 >
