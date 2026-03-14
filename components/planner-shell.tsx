@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
+import { TikTokEmbed, YouTubeEmbed } from "react-social-media-embed";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useTheme } from "next-themes";
@@ -213,11 +214,11 @@ function parseSocialUrls(raw: string): SocialLink[] {
     }
     if (url.includes("instagram.com")) {
       // https://www.instagram.com/p/ABC123/ or /reel/ABC123/
-      const match = url.match(/\/(p|reel)\/([^/?]+)/);
+      const match = url.match(/\/(p|reels?)\/([\w-]+)/);
       return {
         platform: "instagram" as const,
         url,
-        embedUrl: match ? `https://www.instagram.com/p/${match[2]}/embed/` : null,
+        embedUrl: match ? `https://www.instagram.com/reel/${match[2]}/embed/` : null,
       };
     }
     if (url.includes("youtube.com") || url.includes("youtu.be")) {
@@ -246,16 +247,19 @@ function SocialEmbeds({ links }: { links: SocialLink[] }) {
       </p>
       <div className="flex flex-col gap-2">
         {embeddable.map((link) => (
-          <div key={link.url} className="rounded-lg overflow-hidden border border-border/30">
-            {link.embedUrl ? (
+          <div key={link.url} className="rounded-lg overflow-hidden">
+            {link.platform === "tiktok" ? (
+              <TikTokEmbed url={link.url} width="100%" />
+            ) : link.platform === "instagram" && link.embedUrl ? (
               <iframe
                 src={link.embedUrl}
                 className="w-full border-0"
-                style={{ height: link.platform === "tiktok" ? 320 : link.platform === "youtube" ? 180 : 280 }}
-                allow="encrypted-media"
+                style={{ minHeight: 600 }}
+                allow="encrypted-media; autoplay; fullscreen"
                 loading="lazy"
-                sandbox="allow-scripts allow-same-origin allow-popups"
               />
+            ) : link.platform === "youtube" ? (
+              <YouTubeEmbed url={link.url} width="100%" />
             ) : (
               <a
                 href={link.url}
