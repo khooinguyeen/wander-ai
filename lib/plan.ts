@@ -1,255 +1,257 @@
 import { google } from "@ai-sdk/google";
-import { generateText, Output } from "ai";
+import { generateText, stepCountIs, tool } from "ai";
 import { z } from "zod";
 
-import { buildGoogleMapsUrl, scheduleStops } from "@/lib/routing";
-import { inferDesiredKinds, searchSpots, summarizeAreas } from "@/lib/spots";
-import type { ItineraryResponse, SearchResult, Spot, TravelMode } from "@/lib/types";
+import { getDirections } from "@/lib/directions";
+import { buildGoogleMapsUrl } from "@/lib/routing";
+import { getAllSpots, searchSpots, summarizeAreas } from "@/lib/spots";
+import type { ItineraryResponse, PlannedStop, Spot, TravelMode } from "@/lib/types";
+
+/* ── schemas ────────────────────────────────────────────────── */
 
 const planRequestSchema = z.object({
   query: z.string().trim().min(3).max(280),
   startLocation: z.string().trim().max(120).optional().default(""),
   travelMode: z.enum(["walking", "driving", "transit"]).default("driving"),
-  maxStops: z.number().int().min(2).max(6).default(4)
-});
-
-const blueprintSchema = z.object({
-  dayTheme: z.string().min(3).max(80),
-  summary: z.string().min(20).max(320),
-  routeRationale: z.string().min(20).max(280),
-  selectedStops: z
-    .array(
-      z.object({
-        spotId: z.string(),
-        reason: z.string().min(8).max(180)
-      })
-    )
-    .min(2)
-    .max(6),
-  backupSpotIds: z.array(z.string()).max(3).default([])
+  maxStops: z.number().int().min(2).max(6).default(4),
 });
 
 type PlanRequest = z.infer<typeof planRequestSchema>;
-type Blueprint = z.infer<typeof blueprintSchema>;
 
-function buildTheme(spots: Spot[]) {
-  const area = summarizeAreas(spots);
-  const kinds = [...new Set(spots.map((spot) => spot.kind))];
-  if (kinds.length === 1) {
-    return `${area} ${kinds[0]} run`;
-  }
-  return `${area} mixed route`;
-}
+const itineraryOutputSchema = z.object({
+  dayTheme: z.string().describe("A catchy 3-8 word name for this day plan"),
+  summary: z.string().describe("2-3 sentence description of the route"),
+  routeRationale: z.string().describe("Why this route order makes sense"),
+  stops: z.array(z.object({
+    spotId: z.string().describe("The spot ID from the database"),
+    reason: z.string().describe("Why this spot fits the plan, 1-2 sentences"),
+    arrivalTime: z.string().describe("Arrival time like '9:30 AM'"),
+    departureTime: z.string().describe("Departure time like '10:35 AM'"),
+  })).min(2).max(6),
+  backupSpotIds: z.array(z.string()).max(3).describe("IDs of backup spots that could be swapped in"),
+});
 
-function buildFallbackReason(spot: SearchResult, query: string) {
-  const desiredKinds = inferDesiredKinds(query);
-  if (desiredKinds.includes("lookout") && spot.kind === "lookout") {
-    return `${spot.name} gives the route a scenic reset without drifting too far off-brief.`;
-  }
-  if (desiredKinds.includes("fashion") && spot.kind === "fashion") {
-    return `${spot.name} adds a shopping stop that feels local rather than mall-generic.`;
-  }
-  if (spot.kind === "food") {
-    return `${spot.name} is a strong food anchor with consistent social proof and easy route fit.`;
-  }
-  return `${spot.name} matches the request and keeps the route compact around ${spot.area}.`;
-}
+/* ── planner system prompt ──────────────────────────────────── */
 
-function buildHeuristicBlueprint(request: PlanRequest, candidates: SearchResult[]): Blueprint {
-  const selected: SearchResult[] = [];
-  const desiredKinds = inferDesiredKinds(request.query);
+const PLANNER_SYSTEM = `You are a Melbourne route planner agent. Your job is to build the best possible day route from a database of curated Melbourne spots.
 
-  for (const kind of desiredKinds) {
-    const match = candidates.find((candidate) => candidate.kind === kind && !selected.some((item) => item.id === candidate.id));
-    if (match) {
-      selected.push(match);
-    }
-  }
+## Your process
+1. First, call searchSpots to find candidates matching the user's vibe.
+2. Review the results. Think about what mix of spots makes a great day.
+3. Call getDirections between your planned stops to check real travel times.
+4. If a leg is too long (>30 min walking, >20 min driving), consider reordering or swapping a spot.
+5. Once you're happy with the plan, call finalizePlan with your final selection.
 
-  const anchorArea = selected[0]?.area ?? candidates[0]?.area;
-  const compactCandidates = candidates.filter(
-    (candidate) => candidate.area === anchorArea && !selected.some((item) => item.id === candidate.id)
-  );
+## Planning rules
+- Keep the route geographically compact — don't zigzag across the city.
+- Respect visit windows — don't schedule a brunch spot at 5 PM.
+- Mix up stop kinds when the user's vibe calls for variety.
+- If the user says "lowkey" or "hidden", favor spots with high hiddenGem signals.
+- If they want "viral" or "trending", favor high viral signals.
+- Infer a sensible start time: brunch/coffee → 9:30 AM, lunch → 11:30 AM, dinner/date → 5:30 PM, sunset → 3:30 PM.
+- Each stop's duration should use the spot's idealVisitMinutes.
 
-  for (const candidate of compactCandidates) {
-    if (selected.length >= request.maxStops) {
-      break;
-    }
-    selected.push(candidate);
-  }
+## Important
+- You can call searchSpots multiple times with different queries to find the right mix.
+- You MUST call getDirections at least once to validate travel times between consecutive stops.
+- You MUST call finalizePlan exactly once at the end with your final plan.`;
 
-  for (const candidate of candidates) {
-    if (selected.length >= request.maxStops) {
-      break;
-    }
-    if (!selected.some((item) => item.id === candidate.id)) {
-      selected.push(candidate);
-    }
-  }
+/* ── build itinerary using Gemini agent ─────────────────────── */
 
-  const finalSelection = selected.slice(0, request.maxStops);
+export async function buildItinerary(request: PlanRequest): Promise<ItineraryResponse> {
+  const allSpots = getAllSpots();
+  const spotsById = new Map(allSpots.map((s) => [s.id, s]));
 
-  return {
-    dayTheme: buildTheme(finalSelection),
-    summary: `A compact ${summarizeAreas(finalSelection)} route that leans into ${finalSelection
-      .map((spot) => spot.kind)
-      .filter((value, index, array) => array.indexOf(value) === index)
-      .join(", ")} without wasting time on cross-city zigzags.`,
-    routeRationale: `Starts with the strongest match, then keeps the rest of the day clustered around ${summarizeAreas(
-      finalSelection
-    )}.`,
-    selectedStops: finalSelection.map((spot) => ({
-      spotId: spot.id,
-      reason: buildFallbackReason(spot, request.query)
-    })),
-    backupSpotIds: candidates
-      .filter((candidate) => !finalSelection.some((selectedSpot) => selectedSpot.id === candidate.id))
-      .slice(0, 3)
-      .map((candidate) => candidate.id)
-  };
-}
+  // Collect directions data as the agent calls getDirections
+  const directionsCache: Record<string, { distanceKm: number; durationMinutes: number; summary: string }> = {};
 
-async function buildGeminiBlueprint(request: PlanRequest, candidates: SearchResult[]) {
-  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
-  const { output } = await generateText({
+  const model = process.env.GEMINI_MODEL || "gemini-2.0-flash-lite";
+
+  const { toolResults } = await generateText({
     model: google(model),
-    output: Output.object({
-      schema: blueprintSchema,
-      name: "MelbourneDayPlan",
-      description: "A compact day route chosen only from the provided Melbourne candidate spots."
-    }),
-    system: [
-      "You are a Melbourne route planner.",
-      "Build a practical day plan from the provided candidate spots only.",
-      "Use only spotId values that appear in the candidate list.",
-      "Keep the route geographically compact unless the request explicitly asks for a big destination.",
-      "If the user asks for lowkey or hidden, prioritize higher hiddenGem signals over raw popularity."
-    ].join(" "),
-    prompt: JSON.stringify(
-      {
-        request,
-        candidates: candidates.map((candidate) => ({
-          spotId: candidate.id,
-          name: candidate.name,
-          kind: candidate.kind,
-          area: candidate.area,
-          suburb: candidate.suburb,
-          categories: candidate.categories,
-          vibeTags: candidate.vibeTags,
-          description: candidate.description,
-          whyItTrends: candidate.whyItTrends,
-          priceBand: candidate.priceBand,
-          visitWindows: candidate.visitWindows,
-          signals: candidate.signals,
-          socialProof: candidate.socialProof,
-          matchScore: candidate.matchScore
-        }))
+    system: PLANNER_SYSTEM,
+    prompt: JSON.stringify({
+      userRequest: {
+        query: request.query,
+        startLocation: request.startLocation || "CBD",
+        travelMode: request.travelMode,
+        maxStops: request.maxStops,
       },
-      null,
-      2
-    )
+      totalSpotsInDatabase: allSpots.length,
+    }),
+    tools: {
+      searchSpots: tool({
+        description: "Search the Melbourne spots database. Returns spots ranked by relevance to the query. You can filter by kind (food/lookout/fashion) and area.",
+        inputSchema: z.object({
+          query: z.string().describe("Search query — vibe, cuisine, activity, etc."),
+          area: z.string().optional().describe("Optional area filter like 'Fitzroy', 'CBD', 'South Melbourne'"),
+          kind: z.enum(["food", "lookout", "fashion"]).optional().describe("Optional kind filter"),
+          maxResults: z.number().optional().default(8).describe("Max results to return"),
+        }),
+        execute: async (args) => {
+          let fullQuery = args.query;
+          if (args.area) fullQuery += ` ${args.area}`;
+          if (args.kind) fullQuery += ` ${args.kind}`;
+
+          const results = searchSpots({
+            query: fullQuery,
+            startLocation: args.area,
+            maxResults: args.maxResults ?? 8,
+          });
+
+          return results.map((s) => ({
+            id: s.id,
+            name: s.name,
+            kind: s.kind,
+            area: s.area,
+            suburb: s.suburb,
+            address: s.address,
+            categories: s.categories,
+            vibeTags: s.vibeTags,
+            description: s.description,
+            priceBand: s.priceBand,
+            idealVisitMinutes: s.idealVisitMinutes,
+            visitWindows: s.visitWindows,
+            signals: s.signals,
+            socialProof: { mentions: s.socialProof.mentions, creatorCount: s.socialProof.creatorCount },
+            matchScore: s.matchScore,
+          }));
+        },
+      }),
+
+      getDirections: tool({
+        description: "Get real walking/driving/transit directions between two addresses using Google Maps. Use this to validate travel times between planned stops.",
+        inputSchema: z.object({
+          originAddress: z.string().describe("Starting address or place name"),
+          destinationAddress: z.string().describe("Destination address or place name"),
+          travelMode: z.enum(["walking", "driving", "transit"]).describe("Travel mode"),
+        }),
+        execute: async (args) => {
+          const result = await getDirections(args);
+          const cacheKey = `${args.originAddress}→${args.destinationAddress}`;
+          directionsCache[cacheKey] = {
+            distanceKm: result.distanceKm,
+            durationMinutes: result.durationMinutes,
+            summary: result.summary,
+          };
+          return result;
+        },
+      }),
+
+      finalizePlan: tool({
+        description: "Submit your final route plan. Call this exactly once when you are satisfied with the route.",
+        inputSchema: itineraryOutputSchema,
+        execute: async () => {
+          return { status: "plan_received" };
+        },
+      }),
+    },
+    stopWhen: stepCountIs(8),
   });
 
-  return output;
-}
+  // Extract the finalizePlan call from tool results
+  const finalizeCall = toolResults.find((r) => r.toolName === "finalizePlan");
 
-function finalizeBlueprint(input: {
-  blueprint: Blueprint;
-  request: PlanRequest;
-  candidates: SearchResult[];
-  queryMode: "ai" | "heuristic";
-}): ItineraryResponse {
-  const selectedSpots: Spot[] = [];
-  const reasonsById: Record<string, string> = {};
-
-  for (const entry of input.blueprint.selectedStops) {
-    const match = input.candidates.find((candidate) => candidate.id === entry.spotId);
-    if (match && !selectedSpots.some((spot) => spot.id === match.id)) {
-      selectedSpots.push(match);
-      reasonsById[match.id] = entry.reason;
-    }
+  if (!finalizeCall) {
+    throw new Error("Gemini planner did not call finalizePlan");
   }
 
-  if (selectedSpots.length < 2) {
-    const fallback = buildHeuristicBlueprint(input.request, input.candidates);
-    return finalizeBlueprint({
-      blueprint: fallback,
-      request: input.request,
-      candidates: input.candidates,
-      queryMode: "heuristic"
+  const plan = finalizeCall.input as z.infer<typeof itineraryOutputSchema>;
+  return assemblePlan(plan, request, spotsById, directionsCache);
+}
+
+/* ── assemble the final ItineraryResponse ───────────────────── */
+
+function assemblePlan(
+  plan: z.infer<typeof itineraryOutputSchema>,
+  request: PlanRequest,
+  spotsById: Map<string, Spot>,
+  directionsCache: Record<string, { distanceKm: number; durationMinutes: number; summary: string }>,
+): ItineraryResponse {
+  const plannedStops: PlannedStop[] = [];
+  let totalDistanceKm = 0;
+  let totalTravelMinutes = 0;
+
+  for (let i = 0; i < plan.stops.length; i++) {
+    const entry = plan.stops[i];
+    const spot = spotsById.get(entry.spotId);
+    if (!spot) continue;
+
+    let legDistanceKm = 0;
+    let legMinutes = 0;
+
+    if (i > 0) {
+      const prevSpot = spotsById.get(plan.stops[i - 1].spotId);
+      if (prevSpot) {
+        // Try to find cached directions
+        const cacheKey = `${prevSpot.address}→${spot.address}`;
+        const cached = directionsCache[cacheKey];
+        if (cached) {
+          legDistanceKm = cached.distanceKm;
+          legMinutes = cached.durationMinutes;
+        } else {
+          // Haversine fallback for legs where directions weren't fetched
+          const R = 6371;
+          const dLat = ((spot.coordinates.lat - prevSpot.coordinates.lat) * Math.PI) / 180;
+          const dLng = ((spot.coordinates.lng - prevSpot.coordinates.lng) * Math.PI) / 180;
+          const a =
+            Math.sin(dLat / 2) ** 2 +
+            Math.cos((prevSpot.coordinates.lat * Math.PI) / 180) *
+            Math.cos((spot.coordinates.lat * Math.PI) / 180) *
+            Math.sin(dLng / 2) ** 2;
+          legDistanceKm = Number((R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))).toFixed(1));
+          const speed = request.travelMode === "walking" ? 4.8 : request.travelMode === "transit" ? 18 : 26;
+          legMinutes = Math.max(6, Math.round((legDistanceKm / speed) * 60));
+        }
+        totalDistanceKm += legDistanceKm;
+        totalTravelMinutes += legMinutes;
+      }
+    }
+
+    plannedStops.push({
+      spot,
+      arrivalTime: entry.arrivalTime,
+      departureTime: entry.departureTime,
+      reason: entry.reason,
+      legFromPreviousMinutes: legMinutes,
+      legDistanceKm: Number(legDistanceKm.toFixed(1)),
     });
   }
 
-  const backups = input.blueprint.backupSpotIds
-    .map((spotId) => input.candidates.find((candidate) => candidate.id === spotId))
-    .filter((spot): spot is SearchResult => Boolean(spot))
-    .filter((spot) => !selectedSpots.some((selectedSpot) => selectedSpot.id === spot.id))
+  const selectedSpots = plannedStops.map((s) => s.spot);
+  const backups = plan.backupSpotIds
+    .map((id) => spotsById.get(id))
+    .filter((s): s is Spot => Boolean(s))
+    .filter((s) => !selectedSpots.some((sel) => sel.id === s.id))
     .slice(0, 3);
 
-  const schedule = scheduleStops({
-    spots: selectedSpots,
-    reasonsById,
-    query: input.request.query,
-    travelMode: input.request.travelMode
+  const candidates = searchSpots({
+    query: request.query,
+    startLocation: request.startLocation,
+    maxResults: Math.max(request.maxStops * 3, 10),
   });
 
   return {
-    query: input.request.query,
-    queryMode: input.queryMode,
-    dayTheme: input.blueprint.dayTheme,
+    query: request.query,
+    queryMode: "ai",
+    dayTheme: plan.dayTheme,
     areaSummary: summarizeAreas(selectedSpots),
-    summary: input.blueprint.summary,
-    routeRationale: input.blueprint.routeRationale,
-    travelMode: input.request.travelMode,
+    summary: plan.summary,
+    routeRationale: plan.routeRationale,
+    travelMode: request.travelMode,
     route: {
-      googleMapsUrl: buildGoogleMapsUrl(selectedSpots, input.request.travelMode, input.request.startLocation),
-      totalDistanceKm: schedule.totalDistanceKm,
-      totalTravelMinutes: schedule.totalTravelMinutes
+      googleMapsUrl: buildGoogleMapsUrl(selectedSpots, request.travelMode, request.startLocation),
+      totalDistanceKm: Number(totalDistanceKm.toFixed(1)),
+      totalTravelMinutes,
     },
-    stops: schedule.plannedStops,
+    stops: plannedStops,
     backups,
-    candidates: input.candidates
+    candidates,
   };
 }
 
 export function parsePlanRequest(input: unknown) {
   return planRequestSchema.parse(input);
-}
-
-export async function buildItinerary(request: PlanRequest): Promise<ItineraryResponse> {
-  const candidates = searchSpots({
-    query: request.query,
-    startLocation: request.startLocation,
-    maxResults: Math.max(request.maxStops * 3, 8)
-  });
-
-  const fallbackBlueprint = buildHeuristicBlueprint(request, candidates);
-
-  if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
-    return finalizeBlueprint({
-      blueprint: fallbackBlueprint,
-      request,
-      candidates,
-      queryMode: "heuristic"
-    });
-  }
-
-  try {
-    const blueprint = await buildGeminiBlueprint(request, candidates);
-    return finalizeBlueprint({
-      blueprint,
-      request,
-      candidates,
-      queryMode: "ai"
-    });
-  } catch {
-    return finalizeBlueprint({
-      blueprint: fallbackBlueprint,
-      request,
-      candidates,
-      queryMode: "heuristic"
-    });
-  }
 }
 
 export type { PlanRequest, TravelMode };

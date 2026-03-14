@@ -1,3 +1,23 @@
+export type VenueCategory = "bar" | "cafe" | "restaurant";
+
+export type Venue = {
+  id: string;
+  name: string;
+  description: string;
+  category: VenueCategory;
+  suburb: string;
+  city: string;
+  address: string;
+  lat: number;
+  lng: number;
+  price_level: number;
+  vibe: string;
+  tags: string; // JSON-encoded string array
+  opening_hours: string; // JSON-encoded string array
+  website: string;
+  source_urls: string; // JSON-encoded string array
+};
+
 export type SpotKind = "food" | "lookout" | "fashion";
 export type TravelMode = "walking" | "driving" | "transit";
 

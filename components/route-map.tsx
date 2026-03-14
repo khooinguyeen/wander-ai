@@ -1,16 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
   APIProvider,
   Map,
   AdvancedMarker,
-  Pin,
   useMap,
   useMapsLibrary
 } from "@vis.gl/react-google-maps";
 
-import type { PlannedStop, Spot, TravelMode } from "@/lib/types";
+import type { PlannedStop, Spot, TravelMode, Venue } from "@/lib/types";
 
 const MELBOURNE_CENTER = { lat: -37.8136, lng: 144.9631 };
 const API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
@@ -20,8 +19,11 @@ const DARK_MAP_ID = "DEMO_MAP_ID";
 type RouteMapProps = {
   stops: PlannedStop[];
   previewSpots: Spot[];
+  venues: Venue[];
   activeStopId: string | null;
+  selectedVenueId: string | null;
   onSelectStop: (id: string) => void;
+  onSelectVenue: (id: string) => void;
   startLocation: string;
   travelMode: TravelMode;
   colorScheme?: "DARK" | "LIGHT";
@@ -104,7 +106,7 @@ function DirectionsRenderer({
   return null;
 }
 
-function FitBounds({ stops, previewSpots }: { stops: PlannedStop[]; previewSpots: Spot[] }) {
+function FitBounds({ stops, previewSpots, venues }: { stops: PlannedStop[]; previewSpots: Spot[]; venues: Venue[] }) {
   const map = useMap();
 
   useEffect(() => {
@@ -113,7 +115,9 @@ function FitBounds({ stops, previewSpots }: { stops: PlannedStop[]; previewSpots
     const points =
       stops.length > 0
         ? stops.map((s) => s.spot.coordinates)
-        : previewSpots.map((s) => s.coordinates);
+        : venues.length > 0
+          ? venues.map((v) => ({ lat: v.lat, lng: v.lng }))
+          : previewSpots.map((s) => s.coordinates);
 
     if (points.length === 0) return;
 
@@ -122,20 +126,40 @@ function FitBounds({ stops, previewSpots }: { stops: PlannedStop[]; previewSpots
       bounds.extend({ lat: p.lat, lng: p.lng });
     }
     map.fitBounds(bounds, { top: 80, bottom: 80, left: 420, right: 420 });
-  }, [map, stops, previewSpots]);
+  }, [map, stops, previewSpots, venues]);
 
   return null;
 }
 
+const VENUE_CATEGORY_COLORS: Record<string, string> = {
+  restaurant: "#f97316",
+  cafe: "#a855f7",
+  bar: "#3b82f6",
+};
+
+import { UtensilsCrossed, Coffee, Wine, MapPin } from "lucide-react";
+import type { ReactNode } from "react";
+
+const VENUE_CATEGORY_ICON: Record<string, ReactNode> = {
+  restaurant: <UtensilsCrossed size={14} strokeWidth={2.5} color="#fff" />,
+  cafe: <Coffee size={14} strokeWidth={2.5} color="#fff" />,
+  bar: <Wine size={14} strokeWidth={2.5} color="#fff" />,
+};
+
+
 function GoogleMapInner({
   stops,
   previewSpots,
+  venues,
   activeStopId,
+  selectedVenueId,
   onSelectStop,
+  onSelectVenue,
   travelMode,
   colorScheme = "DARK"
 }: RouteMapProps) {
   const hasStops = stops.length > 0;
+  const hasVenues = venues.length > 0;
 
   return (
     <Map
@@ -151,7 +175,7 @@ function GoogleMapInner({
       fullscreenControl={false}
       style={{ width: "100%", height: "100%" }}
     >
-      <FitBounds stops={stops} previewSpots={previewSpots} />
+      <FitBounds stops={stops} previewSpots={previewSpots} venues={venues} />
 
       {hasStops && <DirectionsRenderer stops={stops} travelMode={travelMode} />}
 
@@ -173,14 +197,47 @@ function GoogleMapInner({
               </div>
             </AdvancedMarker>
           ))
-        : previewSpots.slice(0, 20).map((spot) => (
-            <AdvancedMarker
-              key={spot.id}
-              position={{ lat: spot.coordinates.lat, lng: spot.coordinates.lng }}
-            >
-              <div className="gmap-marker gmap-marker--preview" />
-            </AdvancedMarker>
-          ))}
+        : hasVenues
+          ? venues.map((venue) => {
+              const isSelected = selectedVenueId === venue.id;
+              const color = VENUE_CATEGORY_COLORS[venue.category] ?? "#3b82f6";
+              const icon = VENUE_CATEGORY_ICON[venue.category] ?? <MapPin size={14} strokeWidth={2.5} color="#fff" />;
+              return (
+                <AdvancedMarker
+                  key={venue.id}
+                  position={{ lat: venue.lat, lng: venue.lng }}
+                  title={venue.name}
+                  onClick={() => onSelectVenue(venue.id)}
+                  zIndex={isSelected ? 100 : 10}
+                >
+                  {isSelected ? (
+                    <div className="venue-marker venue-marker--expanded" style={{ borderColor: color }}>
+                      <div className="venue-marker__dot" style={{ background: color }}>
+                        {icon}
+                      </div>
+                      <div className="venue-marker__info">
+                        <span className="venue-marker__name">{venue.name}</span>
+                        <span className="venue-marker__sub">{venue.suburb} · {venue.category}</span>
+                      </div>
+                      <div className="venue-marker__arrow" style={{ borderTopColor: color }} />
+                    </div>
+                  ) : (
+                    <div className="venue-marker venue-marker--dot" style={{ background: color }}>
+                      {icon}
+                      <div className="venue-marker__arrow-sm" style={{ borderTopColor: color }} />
+                    </div>
+                  )}
+                </AdvancedMarker>
+              );
+            })
+          : previewSpots.slice(0, 20).map((spot) => (
+              <AdvancedMarker
+                key={spot.id}
+                position={{ lat: spot.coordinates.lat, lng: spot.coordinates.lng }}
+              >
+                <div className="gmap-marker gmap-marker--preview" />
+              </AdvancedMarker>
+            ))}
     </Map>
   );
 }
@@ -188,18 +245,26 @@ function GoogleMapInner({
 function FallbackMap({
   stops,
   previewSpots,
+  venues,
   activeStopId,
   onSelectStop
 }: Omit<RouteMapProps, "startLocation" | "travelMode">) {
   const hasStops = stops.length > 0;
+  const hasVenues = venues.length > 0;
   const points = hasStops
     ? stops.map((s) => s.spot)
     : previewSpots.slice(0, 20);
 
+  const allCoords = useMemo(() => {
+    if (hasStops) return points.map((p) => ({ lat: p.coordinates.lat, lng: p.coordinates.lng }));
+    if (hasVenues) return venues.map((v) => ({ lat: v.lat, lng: v.lng }));
+    return points.map((p) => ({ lat: p.coordinates.lat, lng: p.coordinates.lng }));
+  }, [hasStops, hasVenues, points, venues]);
+
   const bounds = useMemo(() => {
-    if (points.length === 0) return { minLat: -37.84, maxLat: -37.79, minLng: 144.94, maxLng: 144.99 };
-    const lats = points.map((p) => p.coordinates.lat);
-    const lngs = points.map((p) => p.coordinates.lng);
+    if (allCoords.length === 0) return { minLat: -37.84, maxLat: -37.79, minLng: 144.94, maxLng: 144.99 };
+    const lats = allCoords.map((p) => p.lat);
+    const lngs = allCoords.map((p) => p.lng);
     const pad = 0.005;
     return {
       minLat: Math.min(...lats) - pad,
@@ -207,7 +272,7 @@ function FallbackMap({
       minLng: Math.min(...lngs) - pad,
       maxLng: Math.max(...lngs) + pad
     };
-  }, [points]);
+  }, [allCoords]);
 
   function project(lat: number, lng: number) {
     const x = ((lng - bounds.minLng) / (bounds.maxLng - bounds.minLng)) * 100;
@@ -239,22 +304,54 @@ function FallbackMap({
         </svg>
       )}
 
-      {points.map((spot, i) => {
-        const pos = project(spot.coordinates.lat, spot.coordinates.lng);
-        const isActive = activeStopId === spot.id;
-        return (
-          <button
-            key={spot.id}
-            type="button"
-            className={`fallback-pin ${hasStops ? "fallback-pin--stop" : "fallback-pin--preview"} ${isActive ? "fallback-pin--active" : ""}`}
-            style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
-            onClick={() => onSelectStop(spot.id)}
-            title={spot.name}
-          >
-            {hasStops ? String(i + 1).padStart(2, "0") : ""}
-          </button>
-        );
-      })}
+      {hasStops
+        ? points.map((spot, i) => {
+            const pos = project(spot.coordinates.lat, spot.coordinates.lng);
+            const isActive = activeStopId === spot.id;
+            return (
+              <button
+                key={spot.id}
+                type="button"
+                className={`fallback-pin fallback-pin--stop ${isActive ? "fallback-pin--active" : ""}`}
+                style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
+                onClick={() => onSelectStop(spot.id)}
+                title={spot.name}
+              >
+                {String(i + 1).padStart(2, "0")}
+              </button>
+            );
+          })
+        : hasVenues
+          ? venues.map((venue) => {
+              const pos = project(venue.lat, venue.lng);
+              return (
+                <button
+                  key={venue.id}
+                  type="button"
+                  className="fallback-pin fallback-pin--venue"
+                  style={{
+                    left: `${pos.x}%`,
+                    top: `${pos.y}%`,
+                    background: VENUE_CATEGORY_COLORS[venue.category] ?? "#3b82f6"
+                  }}
+                  title={venue.name}
+                >
+                </button>
+              );
+            })
+          : points.map((spot) => {
+              const pos = project(spot.coordinates.lat, spot.coordinates.lng);
+              return (
+                <button
+                  key={spot.id}
+                  type="button"
+                  className="fallback-pin fallback-pin--preview"
+                  style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
+                  title={spot.name}
+                >
+                </button>
+              );
+            })}
     </div>
   );
 }
