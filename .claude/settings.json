@@ -1,7 +1,23 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git init:*)"
+      "Bash(git init:*)",
+      "Bash(unset GH_TOKEN)",
+      "Bash(ls /Users/khanhgn/unihack/Screenshot*)",
+      "Bash(ls -la /Users/khanhgn/unihack/Screen*)",
+      "Bash(python3 -c \"import os; files = [f for f in os.listdir\\(''/Users/khanhgn/unihack''\\) if f.startswith\\(''Screen''\\)]; print\\(repr\\(files\\)\\)\")",
+      "Bash(python3 -c \":*)",
+      "Bash(npx next:*)",
+      "Bash(curl -s http://localhost:3000)",
+      "Bash(npm install:*)",
+      "Bash(npx tailwindcss:*)",
+      "Bash(node -e \"console.log\\(require\\(''tailwindcss/package.json''\\).version\\)\")",
+      "Bash(npx shadcn@latest add scroll-area card badge button separator avatar --yes)",
+      "Bash(npx shadcn@latest add scroll-area card badge button separator avatar --overwrite --yes)",
+      "WebFetch(domain:ui.shadcn.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:www.assistant-ui.com)",
+      "WebFetch(domain:elements.ai-sdk.dev)"
     ]
   }
 }

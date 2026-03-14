@@ -1,199 +1,270 @@
 "use client";
 
-import { divIcon, point } from "leaflet";
-import { useEffect } from "react";
-import { MapContainer, Marker, Popup, Polyline, TileLayer, ZoomControl, useMap } from "react-leaflet";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  APIProvider,
+  Map,
+  AdvancedMarker,
+  Pin,
+  useMap,
+  useMapsLibrary
+} from "@vis.gl/react-google-maps";
 
-import type { PlannedStop, Spot } from "@/lib/types";
+import type { PlannedStop, Spot, TravelMode } from "@/lib/types";
+
+const MELBOURNE_CENTER = { lat: -37.8136, lng: 144.9631 };
+const API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
+
+const DARK_MAP_ID = "DEMO_MAP_ID";
 
 type RouteMapProps = {
   stops: PlannedStop[];
-  previewSpots?: Spot[];
-  activeStopId?: string | null;
-  onSelectStop?: (spotId: string) => void;
+  previewSpots: Spot[];
+  activeStopId: string | null;
+  onSelectStop: (id: string) => void;
+  startLocation: string;
+  travelMode: TravelMode;
 };
 
-function resolveViewportPadding() {
-  if (typeof window === "undefined") {
-    return {
-      paddingTopLeft: [88, 88] as [number, number],
-      paddingBottomRight: [88, 88] as [number, number]
-    };
+function travelModeToGoogle(mode: TravelMode): google.maps.TravelMode {
+  switch (mode) {
+    case "walking":
+      return google.maps.TravelMode.WALKING;
+    case "transit":
+      return google.maps.TravelMode.TRANSIT;
+    default:
+      return google.maps.TravelMode.DRIVING;
   }
-
-  if (window.innerWidth <= 720) {
-    return {
-      paddingTopLeft: [24, 132] as [number, number],
-      paddingBottomRight: [24, Math.round(window.innerHeight * 0.38)] as [number, number]
-    };
-  }
-
-  if (window.innerWidth <= 960) {
-    return {
-      paddingTopLeft: [28, 150] as [number, number],
-      paddingBottomRight: [28, Math.round(window.innerHeight * 0.34)] as [number, number]
-    };
-  }
-
-  return {
-    paddingTopLeft: [Math.round(Math.min(520, window.innerWidth * 0.38)), 120] as [number, number],
-    paddingBottomRight: [92, 92] as [number, number]
-  };
 }
 
-function resolveFocusOffset() {
-  if (typeof window === "undefined") {
-    return [0, 0] as [number, number];
-  }
-
-  if (window.innerWidth <= 520) {
-    return [0, -Math.round(window.innerHeight * 0.1)] as [number, number];
-  }
-
-  if (window.innerWidth <= 960) {
-    return [0, -Math.round(window.innerHeight * 0.18)] as [number, number];
-  }
-
-  return [-Math.round(Math.min(260, window.innerWidth * 0.16)), 0] as [number, number];
-}
-
-function buildStopIcon(index: number, active: boolean, featured: boolean) {
-  return divIcon({
-    className: "route-map__marker-shell",
-    html: `<span class="route-map__marker${active ? " route-map__marker--active" : ""}${featured ? " route-map__marker--featured" : ""}"><span class="route-map__marker-label">${index + 1}</span></span>`,
-    iconSize: point(36, 36, true),
-    iconAnchor: [18, 30],
-    popupAnchor: [0, -26]
-  });
-}
-
-function buildPreviewIcon() {
-  return divIcon({
-    className: "route-map__marker-shell",
-    html: '<span class="route-map__marker route-map__marker--preview"><span class="route-map__marker-dot"></span></span>',
-    iconSize: point(28, 28, true),
-    iconAnchor: [14, 24],
-    popupAnchor: [0, -20]
-  });
-}
-
-function FitBounds({ points }: { points: [number, number][] }) {
+function DirectionsRenderer({
+  stops,
+  travelMode
+}: {
+  stops: PlannedStop[];
+  travelMode: TravelMode;
+}) {
   const map = useMap();
+  const routesLib = useMapsLibrary("routes");
+  const rendererRef = useRef<google.maps.DirectionsRenderer | null>(null);
 
   useEffect(() => {
-    if (points.length === 0) {
-      return;
-    }
-
-    if (points.length === 1) {
-      map.setView(points[0], 13);
-      return;
-    }
-
-    map.fitBounds(points, resolveViewportPadding());
-  }, [map, points]);
-
-  return null;
-}
-
-function FocusStop({ stops, activeStopId }: Pick<RouteMapProps, "stops" | "activeStopId">) {
-  const map = useMap();
-
-  useEffect(() => {
-    if (!activeStopId) {
-      return;
-    }
-
-    const activeStop = stops.find((stop) => stop.spot.id === activeStopId);
-    if (!activeStop) {
-      return;
-    }
-
-    const offset = resolveFocusOffset();
-    const handleMoveEnd = () => {
-      if (offset[0] === 0 && offset[1] === 0) {
-        return;
+    if (!map || !routesLib || stops.length < 2) {
+      if (rendererRef.current) {
+        rendererRef.current.setMap(null);
+        rendererRef.current = null;
       }
+      return;
+    }
 
-      map.panBy(offset, { animate: true, duration: 0.4 });
-    };
-
-    map.once("moveend", handleMoveEnd);
-    map.flyTo([activeStop.spot.coordinates.lat, activeStop.spot.coordinates.lng], Math.max(map.getZoom(), 14), {
-      duration: 0.65
+    const service = new routesLib.DirectionsService();
+    const renderer = new routesLib.DirectionsRenderer({
+      map,
+      suppressMarkers: true,
+      polylineOptions: {
+        strokeColor: "#4f8cf9",
+        strokeWeight: 4,
+        strokeOpacity: 0.85
+      }
     });
 
+    rendererRef.current = renderer;
+
+    const waypoints = stops.slice(1, -1).map((s) => ({
+      location: new google.maps.LatLng(s.spot.coordinates.lat, s.spot.coordinates.lng),
+      stopover: true
+    }));
+
+    service.route(
+      {
+        origin: new google.maps.LatLng(
+          stops[0].spot.coordinates.lat,
+          stops[0].spot.coordinates.lng
+        ),
+        destination: new google.maps.LatLng(
+          stops[stops.length - 1].spot.coordinates.lat,
+          stops[stops.length - 1].spot.coordinates.lng
+        ),
+        waypoints,
+        travelMode: travelModeToGoogle(travelMode)
+      },
+      (result, status) => {
+        if (status === google.maps.DirectionsStatus.OK && result) {
+          renderer.setDirections(result);
+        }
+      }
+    );
+
     return () => {
-      map.off("moveend", handleMoveEnd);
+      renderer.setMap(null);
     };
-  }, [activeStopId, map, stops]);
+  }, [map, routesLib, stops, travelMode]);
 
   return null;
 }
 
-export function RouteMap({ stops, previewSpots = [], activeStopId, onSelectStop }: RouteMapProps) {
-  const routeSpots = stops.map((stop) => stop.spot);
-  const previewPins = previewSpots.filter((spot) => !routeSpots.some((routeSpot) => routeSpot.id === spot.id));
-  const baseSpots = routeSpots.length > 0 ? routeSpots : previewPins;
-  const center = baseSpots.length > 0 ? ([baseSpots[0].coordinates.lat, baseSpots[0].coordinates.lng] as [number, number]) : ([-37.8136, 144.9631] as [number, number]);
-  const polyline = stops.map((stop) => [stop.spot.coordinates.lat, stop.spot.coordinates.lng]) as [number, number][];
-  const fitPoints = (routeSpots.length > 0 ? routeSpots : previewPins).map((spot) => [spot.coordinates.lat, spot.coordinates.lng]) as [number, number][];
+function FitBounds({ stops, previewSpots }: { stops: PlannedStop[]; previewSpots: Spot[] }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!map) return;
+
+    const points =
+      stops.length > 0
+        ? stops.map((s) => s.spot.coordinates)
+        : previewSpots.map((s) => s.coordinates);
+
+    if (points.length === 0) return;
+
+    const bounds = new google.maps.LatLngBounds();
+    for (const p of points) {
+      bounds.extend({ lat: p.lat, lng: p.lng });
+    }
+    map.fitBounds(bounds, { top: 80, bottom: 80, left: 420, right: 420 });
+  }, [map, stops, previewSpots]);
+
+  return null;
+}
+
+function GoogleMapInner({
+  stops,
+  previewSpots,
+  activeStopId,
+  onSelectStop,
+  travelMode
+}: RouteMapProps) {
+  const hasStops = stops.length > 0;
 
   return (
-    <MapContainer center={center} zoom={12} scrollWheelZoom className="route-map" zoomControl={false}>
-      <TileLayer
-        attribution='&copy; <a href="https://stadiamaps.com/">Stadia Maps</a>, &copy; <a href="https://openmaptiles.org/">OpenMapTiles</a> &copy; <a href="https://openstreetmap.org">OpenStreetMap</a> contributors'
-        url="https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png"
-      />
+    <Map
+      defaultCenter={MELBOURNE_CENTER}
+      defaultZoom={13}
+      mapId={DARK_MAP_ID}
+      colorScheme="DARK"
+      gestureHandling="greedy"
+      disableDefaultUI={false}
+      zoomControl={true}
+      mapTypeControl={false}
+      streetViewControl={false}
+      fullscreenControl={false}
+      style={{ width: "100%", height: "100%" }}
+    >
+      <FitBounds stops={stops} previewSpots={previewSpots} />
 
-      <ZoomControl position="topright" />
+      {hasStops && <DirectionsRenderer stops={stops} travelMode={travelMode} />}
 
-      {polyline.length > 1 ? (
-        <>
-          <Polyline positions={polyline} pathOptions={{ color: "rgba(255,255,255,0.92)", weight: 12, opacity: 0.95 }} />
-          <Polyline positions={polyline} pathOptions={{ color: "#2563eb", weight: 7, opacity: 0.96 }} />
-        </>
-      ) : null}
+      {hasStops
+        ? stops.map((stop, i) => (
+            <AdvancedMarker
+              key={stop.spot.id}
+              position={{
+                lat: stop.spot.coordinates.lat,
+                lng: stop.spot.coordinates.lng
+              }}
+              onClick={() => onSelectStop(stop.spot.id)}
+              zIndex={activeStopId === stop.spot.id ? 100 : 10}
+            >
+              <div
+                className={`gmap-marker ${activeStopId === stop.spot.id ? "gmap-marker--active" : ""}`}
+              >
+                {String(i + 1).padStart(2, "0")}
+              </div>
+            </AdvancedMarker>
+          ))
+        : previewSpots.slice(0, 20).map((spot) => (
+            <AdvancedMarker
+              key={spot.id}
+              position={{ lat: spot.coordinates.lat, lng: spot.coordinates.lng }}
+            >
+              <div className="gmap-marker gmap-marker--preview" />
+            </AdvancedMarker>
+          ))}
+    </Map>
+  );
+}
 
-      {previewPins.map((spot) => (
-        <Marker
-          key={`preview-${spot.id}`}
-          position={[spot.coordinates.lat, spot.coordinates.lng]}
-          icon={buildPreviewIcon()}
-        >
-          <Popup>
-            <strong>{spot.name}</strong>
-            <br />
-            {spot.area} · {spot.kind}
-          </Popup>
-        </Marker>
-      ))}
+function FallbackMap({
+  stops,
+  previewSpots,
+  activeStopId,
+  onSelectStop
+}: Omit<RouteMapProps, "startLocation" | "travelMode">) {
+  const hasStops = stops.length > 0;
+  const points = hasStops
+    ? stops.map((s) => s.spot)
+    : previewSpots.slice(0, 20);
 
-      {stops.map((stop, index) => {
-        const active = activeStopId === stop.spot.id;
+  const bounds = useMemo(() => {
+    if (points.length === 0) return { minLat: -37.84, maxLat: -37.79, minLng: 144.94, maxLng: 144.99 };
+    const lats = points.map((p) => p.coordinates.lat);
+    const lngs = points.map((p) => p.coordinates.lng);
+    const pad = 0.005;
+    return {
+      minLat: Math.min(...lats) - pad,
+      maxLat: Math.max(...lats) + pad,
+      minLng: Math.min(...lngs) - pad,
+      maxLng: Math.max(...lngs) + pad
+    };
+  }, [points]);
 
+  function project(lat: number, lng: number) {
+    const x = ((lng - bounds.minLng) / (bounds.maxLng - bounds.minLng)) * 100;
+    const y = ((bounds.maxLat - lat) / (bounds.maxLat - bounds.minLat)) * 100;
+    return { x: Math.max(2, Math.min(98, x)), y: Math.max(2, Math.min(98, y)) };
+  }
+
+  return (
+    <div className="fallback-map">
+      <div className="fallback-map__notice">
+        Set <code>NEXT_PUBLIC_GOOGLE_MAPS_API_KEY</code> for the real map.
+      </div>
+
+      {hasStops && stops.length >= 2 && (
+        <svg className="fallback-map__routes" viewBox="0 0 100 100" preserveAspectRatio="none">
+          <polyline
+            points={stops
+              .map((s) => {
+                const p = project(s.spot.coordinates.lat, s.spot.coordinates.lng);
+                return `${p.x},${p.y}`;
+              })
+              .join(" ")}
+            fill="none"
+            stroke="rgba(79,140,249,0.6)"
+            strokeWidth="0.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      )}
+
+      {points.map((spot, i) => {
+        const pos = project(spot.coordinates.lat, spot.coordinates.lng);
+        const isActive = activeStopId === spot.id;
         return (
-          <Marker
-            key={stop.spot.id}
-            position={[stop.spot.coordinates.lat, stop.spot.coordinates.lng]}
-            icon={buildStopIcon(index, active, index === 0)}
-            eventHandlers={{
-              click: () => onSelectStop?.(stop.spot.id)
-            }}
+          <button
+            key={spot.id}
+            type="button"
+            className={`fallback-pin ${hasStops ? "fallback-pin--stop" : "fallback-pin--preview"} ${isActive ? "fallback-pin--active" : ""}`}
+            style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
+            onClick={() => onSelectStop(spot.id)}
+            title={spot.name}
           >
-            <Popup>
-              <strong>{stop.spot.name}</strong>
-              <br />
-              {stop.arrivalTime} to {stop.departureTime}
-              <br />
-              {stop.spot.area}
-            </Popup>
-          </Marker>
+            {hasStops ? String(i + 1).padStart(2, "0") : ""}
+          </button>
         );
       })}
+    </div>
+  );
+}
 
-      <FitBounds points={fitPoints} />
-      <FocusStop stops={stops} activeStopId={activeStopId} />
-    </MapContainer>
+export function RouteMap(props: RouteMapProps) {
+  if (!API_KEY) {
+    return <FallbackMap {...props} />;
+  }
+
+  return (
+    <APIProvider apiKey={API_KEY}>
+      <GoogleMapInner {...props} />
+    </APIProvider>
   );
 }
