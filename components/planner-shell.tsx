@@ -636,7 +636,7 @@ export function PlannerShell() {
               e.preventDefault();
               handleSend();
             }}
-            className="flex items-end gap-2 rounded-2xl border border-border/30 px-4 py-3 transition-colors focus-within:border-border/60"
+            className="flex items-end gap-2 rounded-2xl border border-border/80 px-4 py-3 transition-colors focus-within:border-border/100"
           >
             <textarea
               value={input}
@@ -644,7 +644,7 @@ export function PlannerShell() {
               placeholder="Message Scout..."
               rows={1}
               disabled={isBusy}
-              className="flex-1 min-h-[1.4rem] max-h-28 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground/40 outline-none"
+              className="flex-1 min-h-[1.4rem] max-h-28 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground/80 outline-none"
               style={{ fieldSizing: "content" } as React.CSSProperties}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {

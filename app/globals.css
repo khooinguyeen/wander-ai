@@ -172,6 +172,12 @@ body {
 .dark .glass-panel .text-muted-foreground    { color: oklch(0.85 0 0); }
 .dark .glass-panel .text-primary-foreground  { color: oklch(1 0 0); }
 
+.dark .glass-panel .bg-secondary { background-color: oklch(0.28 0.006 285); }
+
+/* Match card and user message bubble to the same background color */
+.dark .glass-panel .bg-card\/40,
+.dark .glass-panel .bg-secondary\/80 { background-color: oklch(0.22 0.006 285); }
+
 /* Light mode — slightly more transparent since the map behind is bright */
 html:not(.dark) .glass-panel {
   background: oklch(0.1 0.005 285 / 0.15);
