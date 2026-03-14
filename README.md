@@ -1,81 +1,36 @@
-# WanderAI
+This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
-AI-powered outing planner that surfaces hidden gems from TikTok, Instagram, and YouTube.
+## Getting Started
 
-## Quick Start
+First, run the development server:
 
-### Prerequisites
-- Python 3.11+
-- Node 18+
-- Docker (for ChromaDB)
-
-### 1. Environment setup
 ```bash
-cp .env.example .env
-# Fill in: ANTHROPIC_API_KEY, GOOGLE_MAPS_API_KEY, MAPBOX_TOKEN, APIFY_API_TOKEN
-```
-
-### 2. Backend
-```bash
-cd backend
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-uvicorn app.main:app --reload --port 8000
-```
-
-### 3. Frontend
-```bash
-cd frontend
-npm install
-cp .env.example .env.local
-# Fill in: VITE_MAPBOX_TOKEN
 npm run dev
+# or
+yarn dev
+# or
+pnpm dev
+# or
+bun dev
 ```
 
-### 4. ChromaDB (Docker)
-```bash
-docker compose up chroma -d
-```
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-### 5. Ingest sample data into ChromaDB
-```bash
-cd data_pipeline
-pip install -r requirements.txt
-python ingestion/chroma_ingestor.py
-```
+You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
-### All-in-one (Docker Compose)
-```bash
-docker compose up --build
-```
+This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
----
+## Learn More
 
-## Development: USE_MOCK_TOOLS=true
+To learn more about Next.js, take a look at the following resources:
 
-Set `USE_MOCK_TOOLS=true` in `.env` to run the backend without ChromaDB or Google Maps API.
-The mock tools return data from `data_pipeline/data/sample_venues.json`.
+- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
+- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
 
----
+You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
-## Team Ownership
+## Deploy on Vercel
 
-| Module | Owner |
-|---|---|
-| `backend/app/schemas/` + `frontend/src/types/` | P5 (frozen — no changes without team sync) |
-| `backend/app/routers/`, `backend/app/agents/` | P1 |
-| `data_pipeline/`, `backend/app/tools/maps_enrich.py` | P2 |
-| `backend/app/services/chroma_*`, `backend/app/tools/vector_search.py` | P3 |
-| `frontend/src/` | P4 |
+The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
----
-
-## API Reference
-
-See `docs/contracts.md` for full request/response shapes.
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/health` | GET | Liveness check |
-| `/api/chat` | POST | SSE streaming chat (onboarding agent) |
-| `/api/plan` | POST | Generate multi-stop itinerary |
+Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
