@@ -1,7 +1,42 @@
-import spotsData from "@/data/melbourne-spots.sample.json";
-import type { SearchResult, Spot, SpotKind } from "@/lib/types";
+import venuesData from "@/venues.json";
+import type { SearchResult, Spot, SpotKind, Venue } from "@/lib/types";
 
-const spots = spotsData as Spot[];
+/** Convert a Venue into the Spot shape the planner expects */
+function venueToSpot(v: Venue): Spot {
+  const kindMap: Record<string, SpotKind> = { restaurant: "food", cafe: "food", bar: "food" };
+  const tags: string[] = (() => { try { return JSON.parse(v.tags); } catch { return []; } })();
+
+  return {
+    id: v.id,
+    name: v.name,
+    kind: kindMap[v.category] ?? "food",
+    area: v.suburb,
+    suburb: v.suburb,
+    city: v.city,
+    neighbourhood: v.suburb,
+    categories: [v.category],
+    vibeTags: tags,
+    description: v.description,
+    whyItTrends: v.description,
+    address: v.address,
+    coordinates: { lat: v.lat, lng: v.lng },
+    priceBand: v.price_level <= 1 ? "$" : v.price_level === 2 ? "$$" : "$$$",
+    idealVisitMinutes: v.category === "cafe" ? 45 : v.category === "bar" ? 60 : 75,
+    bestFor: [v.vibe, v.category],
+    visitWindows: v.category === "cafe" ? ["morning", "afternoon"] : ["afternoon", "evening"],
+    signals: {
+      food: v.category === "restaurant" || v.category === "cafe" ? 0.8 : 0.3,
+      scenic: v.vibe === "romantic" ? 0.7 : 0.3,
+      fashion: 0,
+      hiddenGem: tags.includes("hidden-gem") ? 0.8 : 0.3,
+      viral: tags.includes("viral") ? 0.8 : 0.3,
+    },
+    socialProof: { mentions: 10, creatorCount: 3, lastScrapedAt: "2025-01-01" },
+    sourcePosts: [],
+  };
+}
+
+const spots: Spot[] = (venuesData as Venue[]).map(venueToSpot);
 
 const KIND_KEYWORDS: Record<SpotKind, string[]> = {
   food: ["food", "eat", "brunch", "coffee", "cafe", "dinner", "lunch", "dessert", "restaurant", "bar"],
