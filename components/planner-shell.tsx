@@ -18,6 +18,7 @@ import {
   Loader2,
   LocateFixed,
   MapPin,
+  MessageCircle,
   Moon,
   Route,
   Search,
@@ -42,14 +43,12 @@ import {
   CardHeader,
   CardTitle
 } from "@/components/ui/card";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger
 } from "@/components/ui/tooltip";
-import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import venuesData from "@/venues.json";
 import type {
@@ -304,65 +303,48 @@ function VenueDetail({
   const icon = CATEGORY_ICON[venue.category] ?? <MapPin className="size-5" />;
 
   return (
-    <div className="venue-detail rounded-xl border border-border/40 overflow-hidden">
-      {/* Colored accent header */}
-      <div
-        className="px-4 pt-4 pb-3 relative"
-        style={{ background: `linear-gradient(135deg, ${accentColor}22, ${accentColor}08)` }}
-      >
+    <div className="venue-detail rounded-2xl overflow-hidden">
+      {/* Header */}
+      <div className="px-4 pt-4 pb-2">
         <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-3">
             <div
-              className="grid place-items-center size-10 rounded-xl text-lg"
-              style={{ background: `${accentColor}25` }}
+              className="grid place-items-center size-9 rounded-full"
+              style={{ background: accentColor }}
             >
-              {icon}
+              <span className="text-white">{icon}</span>
             </div>
             <div>
               <h3 className="text-sm font-bold leading-tight">{venue.name}</h3>
-              <p className="text-[0.65rem] text-muted-foreground flex items-center gap-1 mt-0.5">
+              <p className="text-[0.65rem] text-muted-foreground mt-0.5">
                 <span className="capitalize">{venue.category}</span>
-                <span className="opacity-40">·</span>
-                {venue.suburb}
-                <span className="opacity-40">·</span>
-                {priceLabel(venue.price_level)}
+                {" · "}{venue.suburb}{" · "}{priceLabel(venue.price_level)}
               </p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="shrink-0 grid place-items-center size-6 rounded-lg hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
+            className="shrink-0 grid place-items-center size-6 rounded-full hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
           >
             <span className="text-xs">✕</span>
           </button>
         </div>
       </div>
 
-      <div className="px-4 pb-4 pt-3 space-y-3">
-        {/* Description */}
-        <p className="text-xs text-muted-foreground leading-relaxed">
+      {/* Body */}
+      <div className="px-4 pb-4 pt-1 space-y-3">
+        <p className="text-xs text-muted-foreground/80 leading-relaxed">
           {venue.description}
         </p>
 
-        {/* Stats row */}
-        <div className="grid grid-cols-3 gap-1.5">
-          {[
-            { label: "Suburb", value: venue.suburb },
-            { label: "Price", value: priceLabel(venue.price_level) },
-            { label: "Vibe", value: venue.vibe },
-          ].map((s) => (
-            <div key={s.label} className="rounded-lg bg-muted/40 px-2.5 py-2 text-center">
-              <span className="text-[0.55rem] text-muted-foreground uppercase tracking-wider block">{s.label}</span>
-              <strong className="text-xs font-semibold mt-0.5 block capitalize">{s.value}</strong>
-            </div>
-          ))}
-        </div>
-
-        {/* Tags */}
+        {/* Vibe + tags inline */}
         <div className="flex flex-wrap gap-1">
+          <Badge variant="secondary" className="text-[0.6rem] font-medium capitalize">
+            {venue.vibe}
+          </Badge>
           {tags.map((tag) => (
-            <Badge key={tag} variant="outline" className="text-[0.6rem] font-normal">
+            <Badge key={tag} variant="outline" className="text-[0.6rem] font-normal opacity-80">
               {tag}
             </Badge>
           ))}
@@ -371,41 +353,39 @@ function VenueDetail({
         {/* Social embeds */}
         <SocialEmbeds links={socialLinks} />
 
-        <Separator className="opacity-40" />
+        {/* Meta row */}
+        <div className="flex items-center gap-3 text-[0.6rem] text-muted-foreground/70">
+          <span className="flex items-center gap-1">
+            <MapPin className="size-2.5" />
+            {venue.suburb}
+          </span>
+          {hours.length > 0 && (
+            <details className="group inline">
+              <summary className="cursor-pointer hover:text-foreground transition-colors flex items-center gap-1">
+                <Clock3 className="size-2.5" />
+                Hours
+                <span className="group-open:rotate-180 transition-transform text-[0.5rem]">▾</span>
+              </summary>
+              <div className="mt-1.5 space-y-0.5 absolute z-10 bg-popover border border-border/40 rounded-lg p-2.5 shadow-lg text-[0.6rem]">
+                {hours.map((h) => (
+                  <p key={h} className="text-muted-foreground/80">{h}</p>
+                ))}
+              </div>
+            </details>
+          )}
+        </div>
 
-        {/* Hours */}
-        {hours.length > 0 && (
-          <details className="group">
-            <summary className="flex items-center gap-1.5 cursor-pointer text-[0.65rem] font-semibold text-muted-foreground hover:text-foreground transition-colors">
-              <Clock3 className="size-3" />
-              Opening hours
-              <span className="ml-auto text-[0.6rem] opacity-60 group-open:rotate-180 transition-transform">▾</span>
-            </summary>
-            <div className="mt-1.5 space-y-0.5 pl-[18px]">
-              {hours.map((h) => (
-                <p key={h} className="text-[0.6rem] text-muted-foreground/80 leading-relaxed">{h}</p>
-              ))}
-            </div>
-          </details>
-        )}
-
-        {/* Address */}
-        <p className="text-[0.65rem] text-muted-foreground flex items-center gap-1.5">
-          <MapPin className="size-3 shrink-0 text-muted-foreground/60" />
-          {venue.address}
-        </p>
-
-        {/* Action buttons */}
-        <div className="flex gap-2 pt-0.5">
+        {/* Actions */}
+        <div className="flex gap-2">
           {venue.website && (
-            <Button size="sm" variant="outline" className="text-xs flex-1 h-8" asChild>
+            <Button size="sm" variant="outline" className="text-[0.65rem] flex-1 h-7 rounded-full" asChild>
               <a href={venue.website} target="_blank" rel="noreferrer">
                 <ExternalLink className="size-3" />
                 Website
               </a>
             </Button>
           )}
-          <Button size="sm" className="text-xs flex-1 h-8" asChild>
+          <Button size="sm" className="text-[0.65rem] flex-1 h-7 rounded-full" asChild>
             <a
               href={`https://www.google.com/maps/search/?api=1&query=${venue.lat},${venue.lng}`}
               target="_blank"
@@ -426,12 +406,20 @@ function FloatingPill({
   activeCategory,
   onCategoryChange,
   searchQuery,
-  onSearchChange
+  onSearchChange,
+  leftOpen,
+  rightOpen,
+  onToggleLeft,
+  onToggleRight
 }: {
   activeCategory: CategoryFilter;
   onCategoryChange: (cat: CategoryFilter) => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
+  leftOpen: boolean;
+  rightOpen: boolean;
+  onToggleLeft: () => void;
+  onToggleRight: () => void;
 }) {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
@@ -441,18 +429,19 @@ function FloatingPill({
   return (
     <TooltipProvider delayDuration={200}>
       <div className="floating-pill absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 px-2 py-1.5">
+        {/* Toggle workspace */}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               variant="ghost"
               size="icon-xs"
-              className="rounded-full"
-              disabled
+              className={cn("rounded-full", leftOpen && "bg-secondary")}
+              onClick={onToggleLeft}
             >
-              <Waypoints className="size-3.5" />
+              <MapPin className="size-3.5" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">Scout Map</TooltipContent>
+          <TooltipContent side="bottom">{leftOpen ? "Hide places" : "Show places"}</TooltipContent>
         </Tooltip>
 
         <div className="h-4 w-px bg-border mx-0.5" />
@@ -526,6 +515,23 @@ function FloatingPill({
             {mounted && theme === "dark" ? "Light mode" : "Dark mode"}
           </TooltipContent>
         </Tooltip>
+
+        <div className="h-4 w-px bg-border mx-0.5" />
+
+        {/* Toggle chat */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className={cn("rounded-full", rightOpen && "bg-secondary")}
+              onClick={onToggleRight}
+            >
+              <MessageCircle className="size-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{rightOpen ? "Hide chat" : "Show chat"}</TooltipContent>
+        </Tooltip>
       </div>
     </TooltipProvider>
   );
@@ -591,6 +597,8 @@ export function PlannerShell() {
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
   const [venueSearch, setVenueSearch] = useState("");
   const [selectedVenueId, setSelectedVenueId] = useState<string | null>(null);
+  const [leftOpen, setLeftOpen] = useState(true);
+  const [rightOpen, setRightOpen] = useState(true);
   const { resolvedTheme } = useTheme();
 
   const selectedVenue = useMemo(
@@ -774,11 +782,15 @@ export function PlannerShell() {
         onCategoryChange={setCategoryFilter}
         searchQuery={venueSearch}
         onSearchChange={setVenueSearch}
+        leftOpen={leftOpen}
+        rightOpen={rightOpen}
+        onToggleLeft={() => setLeftOpen((v) => !v)}
+        onToggleRight={() => setRightOpen((v) => !v)}
       />
 
       {/* ── LEFT: workspace ────────────────────────────────── */}
-      <aside className="glass-panel glass-panel--left">
-        <ScrollArea className="flex-1 min-h-0">
+      <aside className={`glass-panel glass-panel--left ${leftOpen ? "" : "glass-panel--collapsed-left"}`}>
+        <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide">
           <div className="p-5 space-y-5">
 
             {itinerary ? (
@@ -967,11 +979,11 @@ export function PlannerShell() {
               </div>
             )}
           </div>
-        </ScrollArea>
+        </div>
       </aside>
 
       {/* ── RIGHT: chat ────────────────────────────────────── */}
-      <aside className="glass-panel glass-panel--right flex flex-col">
+      <aside className={`glass-panel glass-panel--right flex flex-col ${rightOpen ? "" : "glass-panel--collapsed-right"}`}>
         {/* conversation */}
         <Conversation className="flex-1 min-h-0">
           <ConversationContent className="gap-4 px-5 py-5">
