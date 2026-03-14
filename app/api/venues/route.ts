@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 import { VENUES } from "@/lib/spots";
 
-export const dynamic = "force-static";
+export const runtime = "nodejs";
 
 export async function GET() {
-  return NextResponse.json(VENUES);
+  return NextResponse.json(VENUES, {
+    headers: {
+      "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
+    },
+  });
 }

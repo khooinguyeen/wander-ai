@@ -198,21 +198,107 @@ html:not(.dark) .glass-panel {
 .glass-panel--left { left: var(--panel-gap); }
 .glass-panel--right { right: var(--panel-gap); }
 
-/* Collapse transitions */
+/* Collapse transitions — morph from corner circle */
 .glass-panel {
-  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease;
+  transition:
+    transform 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.35s ease,
+    border-radius 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .glass-panel--collapsed-left {
-  transform: translateX(calc(-100% - var(--panel-gap)));
+  transform: scale(0);
+  transform-origin: 24px 24px;
   opacity: 0;
   pointer-events: none;
+  border-radius: 50%;
 }
 .glass-panel--collapsed-right {
-  transform: translateX(calc(100% + var(--panel-gap)));
+  transform: scale(0);
+  transform-origin: calc(100% - 24px) 24px;
+  opacity: 0;
+  pointer-events: none;
+  border-radius: 50%;
+}
+
+/* ── Panel open buttons (glass circles, match pill style) ──── */
+.panel-open-btn {
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  background: oklch(0.1 0.005 285 / 0.65);
+  border: 1px solid oklch(1 0 0 / 0.1);
+  box-shadow: 0 4px 20px oklch(0 0 0 / 0.3);
+  color: oklch(1 0 0);
+}
+html:not(.dark) .panel-open-btn {
+  background: oklch(1 0 0 / 0.75);
+  border: 1px solid oklch(0 0 0 / 0.08);
+  box-shadow: 0 2px 12px oklch(0 0 0 / 0.12);
+  color: oklch(0.15 0.01 260);
+}
+.panel-open-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 24px oklch(0 0 0 / 0.35);
+}
+.panel-open-btn--hidden {
+  transform: scale(0);
   opacity: 0;
   pointer-events: none;
 }
 
+/* ── Panel close corner (follows outer border curve) ──────── */
+.panel-close-corner {
+  position: absolute;
+  top: 0;
+  z-index: 20;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  background: oklch(1 0 0 / 0.08);
+  border: none;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  color: oklch(1 0 0 / 0.6);
+  pointer-events: none;
+}
+html:not(.dark) .panel-close-corner {
+  background: oklch(0 0 0 / 0.06);
+  color: oklch(0 0 0 / 0.5);
+}
+
+/* Match the panel's 1rem border-radius on the outer corner */
+.panel-close-corner--left {
+  left: 0;
+  border-top-left-radius: 1rem;
+  border-bottom-right-radius: 1rem;
+}
+.panel-close-corner--right {
+  right: 0;
+  border-top-right-radius: 1rem;
+  border-bottom-left-radius: 1rem;
+}
+
+/* Invisible hit area so hover triggers before cursor is on the tiny button */
+.panel-close-corner::before {
+  content: "";
+  position: absolute;
+  top: -6px;
+  width: 48px;
+  height: 48px;
+  pointer-events: auto;
+}
+.panel-close-corner--left::before { left: -6px; }
+.panel-close-corner--right::before { right: -6px; }
+
+.panel-close-corner:hover {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  background: oklch(1 0 0 / 0.14);
+}
+html:not(.dark) .panel-close-corner:hover {
+  background: oklch(0 0 0 / 0.1);
+}
 
 /* ── floating pill bar (same glass + color overrides as panels) ── */
 .floating-pill {
@@ -567,6 +653,48 @@ html:not(.dark) .floating-pill {
   50%      { opacity: 0; }
 }
 
+/* ── Leaf wind animation (typing indicator) ──────────────── */
+@keyframes leaf-drift {
+  0%   { transform: translate(0, 0) rotate(0deg) scale(1); opacity: 0; }
+  10%  { opacity: 1; }
+  50%  { transform: translate(18px, -6px) rotate(40deg) scale(0.9); opacity: 0.8; }
+  80%  { opacity: 0.4; }
+  100% { transform: translate(36px, 2px) rotate(80deg) scale(0.7); opacity: 0; }
+}
+@keyframes leaf-drift-2 {
+  0%   { transform: translate(0, 0) rotate(-10deg) scale(1); opacity: 0; }
+  15%  { opacity: 1; }
+  50%  { transform: translate(22px, -3px) rotate(30deg) scale(0.85); opacity: 0.7; }
+  100% { transform: translate(40px, 4px) rotate(70deg) scale(0.6); opacity: 0; }
+}
+@keyframes leaf-drift-3 {
+  0%   { transform: translate(0, 0) rotate(15deg) scale(0.9); opacity: 0; }
+  12%  { opacity: 0.9; }
+  50%  { transform: translate(16px, -8px) rotate(50deg) scale(0.8); opacity: 0.6; }
+  100% { transform: translate(32px, 0px) rotate(90deg) scale(0.5); opacity: 0; }
+}
+
+.leaf-wind {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  position: relative;
+}
+.leaf-wind__leaf {
+  display: inline-block;
+  font-size: 10px;
+  line-height: 1;
+  animation: leaf-drift 1.6s ease-in-out infinite;
+}
+.leaf-wind__leaf:nth-child(2) {
+  animation: leaf-drift-2 1.6s ease-in-out 0.3s infinite;
+  font-size: 8px;
+}
+.leaf-wind__leaf:nth-child(3) {
+  animation: leaf-drift-3 1.6s ease-in-out 0.6s infinite;
+  font-size: 9px;
+}
+
 /* ── responsive ────────────────────────────────────────────── */
 @media (max-width: 1100px) {
   .glass-panel { --panel-w: min(340px, 38vw); }
@@ -618,6 +746,42 @@ html:not(.dark) .floating-pill {
 }
 .planning-dot {
   animation: planning-pulse 1.4s ease-in-out infinite;
+}
+
+/* ── Pill search input ─────────────────────────────────────── */
+.pill-search {
+  background: oklch(0 0 0 / 0.06);
+}
+.dark .pill-search {
+  background: oklch(1 0 0 / 0.08);
+}
+.pill-search:focus-within {
+  background: oklch(0 0 0 / 0.1);
+  box-shadow: 0 0 0 1px oklch(0.55 0.18 255 / 0.3);
+}
+.dark .pill-search:focus-within {
+  background: oklch(1 0 0 / 0.12);
+  box-shadow: 0 0 0 1px oklch(0.68 0.16 252 / 0.3);
+}
+
+/* ── Suburb group header ───────────────────────────────────── */
+.suburb-header {
+  background: none;
+  border: none;
+}
+
+/* ── Venue card ────────────────────────────────────────────── */
+.venue-card img {
+  transition: transform 0.3s ease;
+}
+.venue-card:hover img {
+  transform: scale(1.05);
+}
+.venue-card-placeholder {
+  background: linear-gradient(135deg, oklch(0.5 0.02 260 / 0.08), oklch(0.6 0.04 260 / 0.12));
+}
+.dark .venue-card-placeholder {
+  background: linear-gradient(135deg, oklch(0.2 0.01 260 / 0.3), oklch(0.25 0.02 260 / 0.4));
 }
 
 @media (max-width: 700px) {

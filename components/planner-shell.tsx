@@ -47,8 +47,10 @@ import {
   TooltipProvider,
   TooltipTrigger
 } from "@/components/ui/tooltip";
-import { AgentIcon } from "@/components/agent-icon";
+import { AgentIcon, AgentIconWindy } from "@/components/agent-icon";
 import { cn } from "@/lib/utils";
+import { usePlaceDetails } from "@/lib/use-place-details";
+import { usePlacePhoto } from "@/lib/use-place-photo";
 import type {
   ItineraryResponse,
   PlannedStop,
@@ -56,6 +58,7 @@ import type {
   Venue,
   VenueCategory
 } from "@/lib/types";
+import { Star } from "lucide-react";
 
 /* ── Lazy-loaded heavy components ─────────────────────────── */
 const RouteMap = dynamic(
@@ -158,6 +161,16 @@ function priceLabel(level: number | null): string {
   return "$".repeat(level);
 }
 
+/* ── Category icon helper ─────────────────────────────────── */
+const CATEGORY_ICON_SM: Record<string, React.ReactNode> = {
+  restaurant: <UtensilsCrossed className="size-3" />,
+  cafe: <Coffee className="size-3" />,
+  bar: <Wine className="size-3" />,
+  attraction: <MapPin className="size-3" />,
+  shopping: <MapPin className="size-3" />,
+  other: <MapPin className="size-3" />,
+};
+
 /* ── Venue card (compact list item) ───────────────────────── */
 function VenueCard({
   venue,
@@ -168,57 +181,79 @@ function VenueCard({
   active: boolean;
   onSelect: (id: string) => void;
 }) {
-  const tags = parseTags(venue.tags);
-  const categoryIcon =
-    venue.uiCategory === "restaurant" ? <UtensilsCrossed className="size-3" /> :
-    venue.uiCategory === "cafe" ? <Coffee className="size-3" /> :
-    <Wine className="size-3" />;
+  const icon = CATEGORY_ICON_SM[venue.uiCategory] ?? <MapPin className="size-3" />;
+  const { url: photoUrl, loaded: photoLoaded, ref: photoRef } = usePlacePhoto(venue.google_place_id);
 
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(venue.id)}
-      className={cn(
-        "w-full text-left rounded-xl border p-3.5 space-y-2 transition-all cursor-pointer",
-        active
-          ? "border-primary/40 bg-primary/8 shadow-sm"
-          : "border-border/40 bg-card/40 hover:border-border/60 hover:bg-card/60"
-      )}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 space-y-0.5">
-          <h3 className="text-sm font-semibold truncate">{venue.name}</h3>
-          <p className="text-[0.65rem] text-muted-foreground flex items-center gap-1">
-            {categoryIcon}
-            <span className="capitalize">{venue.uiCategory}</span>
-            <span className="opacity-40">·</span>
-            {venue.suburb !== "unknown" ? venue.suburb : venue.city}
-            <span className="opacity-40">·</span>
-            {priceLabel(venue.price_level)}
+    <div ref={photoRef}>
+      <button
+        type="button"
+        onClick={() => onSelect(venue.id)}
+        className={cn(
+          "venue-card w-full text-left rounded-xl border overflow-hidden transition-all cursor-pointer",
+          "grid grid-cols-[1fr_100px]",
+          active
+            ? "border-primary/40 bg-primary/8 shadow-sm"
+            : "border-border/40 bg-card/40 hover:border-border/60 hover:bg-card/60"
+        )}
+      >
+        {/* Text content */}
+        <div className="p-3 space-y-1 min-w-0">
+          <div className="flex items-center gap-1.5 text-muted-foreground/60">
+            {icon}
+            <span className="text-[0.6rem] capitalize">{venue.uiCategory}</span>
+            {priceLabel(venue.price_level) && (
+              <span className="text-[0.6rem]">{priceLabel(venue.price_level)}</span>
+            )}
+          </div>
+          <h3 className="text-sm font-semibold truncate leading-tight">{venue.name}</h3>
+          <p className="text-[0.7rem] text-muted-foreground/70 leading-relaxed line-clamp-2">
+            {venue.description}
           </p>
         </div>
-        <Badge variant="secondary" className="shrink-0 text-[0.6rem] capitalize">
-          {venue.vibe}
-        </Badge>
-      </div>
 
-      <p className="text-xs text-muted-foreground/80 leading-relaxed line-clamp-2">
-        {venue.description}
-      </p>
-
-      <div className="flex flex-wrap gap-1">
-        {tags.slice(0, 3).map((tag) => (
-          <Badge key={tag} variant="outline" className="text-[0.6rem] font-normal">
-            {tag}
-          </Badge>
-        ))}
-      </div>
-    </button>
+        {/* Photo */}
+        <div className="relative h-full min-h-[90px]">
+          {photoUrl ? (
+            <img
+              src={photoUrl}
+              alt={venue.name}
+              className="absolute inset-0 w-full h-full object-cover"
+              loading="lazy"
+            />
+          ) : (
+            <div className={cn(
+              "absolute inset-0 venue-card-placeholder",
+              !photoLoaded && "animate-pulse"
+            )}>
+              <span className="absolute inset-0 grid place-items-center text-muted-foreground/15">
+                {icon}
+              </span>
+            </div>
+          )}
+        </div>
+      </button>
+    </div>
   );
 }
 
-/* ── Windowed venue list (renders in batches to avoid jank) ── */
-const VENUE_PAGE_SIZE = 20;
+/* ── Windowed venue list grouped by suburb ────────────────── */
+const VENUE_PAGE_SIZE = 30;
+
+type SuburbGroup = { suburb: string; venues: Venue[] };
+
+function groupBySuburb(venues: Venue[]): SuburbGroup[] {
+  const map = new Map<string, Venue[]>();
+  for (const v of venues) {
+    const key = v.suburb !== "unknown" ? v.suburb : v.city;
+    const arr = map.get(key);
+    if (arr) arr.push(v);
+    else map.set(key, [v]);
+  }
+  return Array.from(map.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([suburb, venues]) => ({ suburb, venues }));
+}
 
 function VenueList({
   venues,
@@ -232,10 +267,8 @@ function VenueList({
   const [visible, setVisible] = useState(VENUE_PAGE_SIZE);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
-  // Reset visible count when the list changes (filter/search)
   useEffect(() => { setVisible(VENUE_PAGE_SIZE); }, [venues]);
 
-  // IntersectionObserver to load more when scrolling near the bottom
   useEffect(() => {
     const el = sentinelRef.current;
     if (!el) return;
@@ -251,15 +284,30 @@ function VenueList({
     return () => observer.disconnect();
   }, [venues.length]);
 
+  const groups = useMemo(() => groupBySuburb(venues.slice(0, visible)), [venues, visible]);
+
   return (
-    <div className="space-y-2.5">
-      {venues.slice(0, visible).map((venue) => (
-        <VenueCard
-          key={venue.id}
-          venue={venue}
-          active={selectedVenueId === venue.id}
-          onSelect={onSelect}
-        />
+    <div className="space-y-4">
+      {groups.map((group) => (
+        <div key={group.suburb}>
+          <div className="suburb-header sticky top-0 z-10 flex items-center gap-2 px-1 py-1.5 mb-1.5">
+            <MapPin className="size-3 text-primary/60" />
+            <span className="text-[0.7rem] font-semibold tracking-wide uppercase text-primary/80">
+              {group.suburb}
+            </span>
+            <span className="text-[0.6rem] text-muted-foreground/50">{group.venues.length}</span>
+          </div>
+          <div className="space-y-2">
+            {group.venues.map((venue) => (
+              <VenueCard
+                key={venue.id}
+                venue={venue}
+                active={selectedVenueId === venue.id}
+                onSelect={onSelect}
+              />
+            ))}
+          </div>
+        </div>
       ))}
       {visible < venues.length && (
         <div ref={sentinelRef} className="flex justify-center py-2">
@@ -379,15 +427,38 @@ function VenueDetail({
   onClose: () => void;
 }) {
   const tags = parseTags(venue.tags);
-  const hours: string[] = (() => { try { return JSON.parse(venue.opening_hours); } catch { return []; } })();
   const socialLinks = parseSocialUrls(venue.source_urls);
   const accentColor = CATEGORY_COLORS[venue.uiCategory] ?? "oklch(0.65 0.16 255)";
   const icon = CATEGORY_ICON[venue.uiCategory] ?? <MapPin className="size-5" />;
 
+  // Fetch live Place details (photos, rating, hours, reviews) via Place ID
+  const { data: place, loading: placeLoading } = usePlaceDetails(venue.google_place_id);
+
+  const liveHours = place?.currentOpeningHours?.weekdayDescriptions;
+  const fallbackHours: string[] = (() => { try { return JSON.parse(venue.opening_hours); } catch { return []; } })();
+  const hours = liveHours ?? (fallbackHours.length > 0 ? fallbackHours : undefined);
+
   return (
     <div className="venue-detail rounded-2xl overflow-hidden">
+      {/* Photo carousel from Google Places */}
+      {place?.photos && place.photos.length > 0 ? (
+        <div className="flex gap-0.5 overflow-x-auto scrollbar-hide">
+          {place.photos.map((photo, i) => (
+            <img
+              key={i}
+              src={photo.url}
+              alt={`${venue.name} photo ${i + 1}`}
+              className="h-36 w-auto object-cover flex-shrink-0"
+              loading="lazy"
+            />
+          ))}
+        </div>
+      ) : placeLoading ? (
+        <div className="h-36 animate-pulse bg-muted" />
+      ) : null}
+
       {/* Header */}
-      <div className="px-4 pt-4 pb-2">
+      <div className="px-4 pt-3 pb-2">
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-3">
             <div
@@ -398,10 +469,17 @@ function VenueDetail({
             </div>
             <div>
               <h3 className="text-sm font-bold leading-tight">{venue.name}</h3>
-              <p className="text-[0.65rem] text-muted-foreground mt-0.5">
-                <span className="capitalize">{venue.uiCategory}</span>
-                {" · "}{venue.suburb !== "unknown" ? venue.suburb : venue.city}{" · "}{priceLabel(venue.price_level)}
-              </p>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className="text-[0.65rem] text-muted-foreground capitalize">{venue.uiCategory}</span>
+                <span className="text-[0.65rem] text-muted-foreground/50">·</span>
+                <span className="text-[0.65rem] text-muted-foreground">{venue.suburb !== "unknown" ? venue.suburb : venue.city}</span>
+                {priceLabel(venue.price_level) && (
+                  <>
+                    <span className="text-[0.65rem] text-muted-foreground/50">·</span>
+                    <span className="text-[0.65rem] text-muted-foreground">{priceLabel(venue.price_level)}</span>
+                  </>
+                )}
+              </div>
             </div>
           </div>
           <button
@@ -412,25 +490,79 @@ function VenueDetail({
             <span className="text-xs">✕</span>
           </button>
         </div>
+
+        {/* Rating + open/closed from Google Places */}
+        {place && (
+          <div className="flex items-center gap-3 mt-2">
+            {place.rating != null && (
+              <span className="flex items-center gap-1 text-[0.65rem] font-medium">
+                <Star className="size-3 fill-amber-400 text-amber-400" />
+                {place.rating.toFixed(1)}
+                {place.userRatingCount != null && (
+                  <span className="text-muted-foreground font-normal">({place.userRatingCount.toLocaleString()})</span>
+                )}
+              </span>
+            )}
+            {place.currentOpeningHours?.openNow != null && (
+              <span className={cn(
+                "text-[0.6rem] font-semibold px-1.5 py-0.5 rounded-full",
+                place.currentOpeningHours.openNow
+                  ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                  : "bg-red-500/15 text-red-600 dark:text-red-400"
+              )}>
+                {place.currentOpeningHours.openNow ? "Open now" : "Closed"}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Body */}
       <div className="px-4 pb-4 pt-1 space-y-3">
         <p className="text-xs text-muted-foreground/80 leading-relaxed">
-          {venue.description}
+          {place?.editorialSummary?.text ?? venue.description}
         </p>
 
-        {/* Vibe + tags inline */}
+        {/* Vibe + tags */}
         <div className="flex flex-wrap gap-1">
-          <Badge variant="secondary" className="text-[0.6rem] font-medium capitalize">
-            {venue.vibe}
-          </Badge>
+          {venue.vibe && (
+            <Badge variant="secondary" className="text-[0.6rem] font-medium capitalize">
+              {venue.vibe}
+            </Badge>
+          )}
           {tags.map((tag) => (
             <Badge key={tag} variant="outline" className="text-[0.6rem] font-normal opacity-80">
               {tag}
             </Badge>
           ))}
         </div>
+
+        {/* Google reviews */}
+        {place?.reviews && place.reviews.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-[0.6rem] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
+              Reviews
+            </p>
+            {place.reviews.map((review, i) => (
+              <div key={i} className="text-[0.65rem] rounded-lg bg-muted/40 p-2.5 space-y-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="flex items-center gap-0.5">
+                    {Array.from({ length: review.rating }, (_, j) => (
+                      <Star key={j} className="size-2.5 fill-amber-400 text-amber-400" />
+                    ))}
+                  </span>
+                  {review.authorAttribution?.displayName && (
+                    <span className="text-muted-foreground">{review.authorAttribution.displayName}</span>
+                  )}
+                  <span className="text-muted-foreground/60 ml-auto">{review.relativePublishTimeDescription}</span>
+                </div>
+                {review.text?.text && (
+                  <p className="text-muted-foreground/80 line-clamp-3">{review.text.text}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Social embeds */}
         <SocialEmbeds links={socialLinks} />
@@ -441,7 +573,7 @@ function VenueDetail({
             <MapPin className="size-2.5" />
             {venue.suburb !== "unknown" ? venue.suburb : venue.city}
           </span>
-          {hours.length > 0 && (
+          {hours && hours.length > 0 && (
             <details className="group inline">
               <summary className="cursor-pointer hover:text-foreground transition-colors flex items-center gap-1">
                 <Clock3 className="size-2.5" />
@@ -459,9 +591,9 @@ function VenueDetail({
 
         {/* Actions */}
         <div className="flex gap-2">
-          {venue.website && (
+          {(place?.websiteUri ?? venue.website) && (
             <Button size="sm" variant="outline" className="text-[0.65rem] flex-1 h-7 rounded-full" asChild>
-              <a href={venue.website} target="_blank" rel="noreferrer">
+              <a href={(place?.websiteUri ?? venue.website)!} target="_blank" rel="noreferrer">
                 <ExternalLink className="size-3" />
                 Website
               </a>
@@ -469,7 +601,7 @@ function VenueDetail({
           )}
           <Button size="sm" className="text-[0.65rem] flex-1 h-7 rounded-full" asChild>
             <a
-              href={venue.google_maps_url ?? `https://www.google.com/maps/search/?api=1&query=${venue.lat},${venue.lng}`}
+              href={place?.googleMapsUri ?? venue.google_maps_url ?? `https://www.google.com/maps/search/?api=1&query=${venue.lat},${venue.lng}`}
               target="_blank"
               rel="noreferrer"
             >
@@ -483,139 +615,93 @@ function VenueDetail({
   );
 }
 
-/* ── Floating pill menu ───────────────────────────────────── */
+/* ── Floating pill menu (center) ──────────────────────────── */
 function FloatingPill({
   activeCategory,
   onCategoryChange,
   searchQuery,
   onSearchChange,
-  leftOpen,
-  rightOpen,
-  onToggleLeft,
-  onToggleRight
 }: {
   activeCategory: CategoryFilter;
   onCategoryChange: (cat: CategoryFilter) => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
-  leftOpen: boolean;
-  rightOpen: boolean;
-  onToggleLeft: () => void;
-  onToggleRight: () => void;
 }) {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
   useEffect(() => setMounted(true), []);
 
   return (
-    <TooltipProvider delayDuration={200}>
-      <div className="floating-pill absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 px-2 py-1.5">
-        {/* Toggle workspace */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              className={cn("rounded-full", leftOpen && "bg-secondary")}
-              onClick={onToggleLeft}
-            >
-              <MapPin className="size-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">{leftOpen ? "Hide places" : "Show places"}</TooltipContent>
-        </Tooltip>
+    <div className="floating-pill absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 px-2 py-1.5">
+      {CATEGORIES.map((cat) => (
+        <button
+          key={cat.value}
+          type="button"
+          onClick={() => onCategoryChange(cat.value)}
+          className={cn(
+            "flex items-center gap-1 px-2.5 py-1 rounded-full text-[0.65rem] font-medium transition-all duration-150",
+            activeCategory === cat.value
+              ? "bg-secondary text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+          )}
+        >
+          {cat.icon}
+          {cat.label}
+        </button>
+      ))}
 
-        <div className="h-4 w-px bg-border mx-0.5" />
+      <div className="h-4 w-px bg-border mx-0.5" />
 
-        {CATEGORIES.map((cat) => (
-          <button
-            key={cat.value}
-            type="button"
-            onClick={() => onCategoryChange(cat.value)}
-            className={cn(
-              "flex items-center gap-1 px-2.5 py-1 rounded-full text-[0.65rem] font-medium transition-all duration-150",
-              activeCategory === cat.value
-                ? "bg-secondary text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
-            )}
-          >
-            {cat.icon}
-            {cat.label}
-          </button>
-        ))}
-
-        <div className="h-4 w-px bg-border mx-0.5" />
-
-        {searchOpen ? (
-          <div className="flex items-center gap-1.5">
-            <Search className="size-3 text-muted-foreground shrink-0" />
-            <input
-              autoFocus
-              value={searchQuery}
-              onChange={(e) => onSearchChange(e.target.value)}
-              onBlur={() => { if (!searchQuery) setSearchOpen(false); }}
-              onKeyDown={(e) => { if (e.key === "Escape") { onSearchChange(""); setSearchOpen(false); } }}
-              placeholder="Search venues..."
-              className="bg-transparent text-[0.7rem] text-foreground placeholder:text-muted-foreground outline-none w-28"
-            />
-          </div>
-        ) : (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                className="rounded-full"
-                onClick={() => setSearchOpen(true)}
-              >
-                <Search className="size-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">Search</TooltipContent>
-          </Tooltip>
-        )}
-
-        <div className="h-4 w-px bg-border mx-0.5" />
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              className="rounded-full"
-              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            >
-              {mounted && theme === "dark" ? (
-                <Sun className="size-3.5" />
-              ) : (
-                <Moon className="size-3.5" />
-              )}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            {mounted && theme === "dark" ? "Light mode" : "Dark mode"}
-          </TooltipContent>
-        </Tooltip>
-
-        <div className="h-4 w-px bg-border mx-0.5" />
-
-        {/* Toggle chat */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              className={cn("rounded-full", rightOpen && "bg-secondary")}
-              onClick={onToggleRight}
-            >
-              <MessageCircle className="size-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">{rightOpen ? "Hide chat" : "Show chat"}</TooltipContent>
-        </Tooltip>
+      <div className="pill-search flex items-center gap-1.5 rounded-full px-2.5 py-1">
+        <Search className="size-3 text-muted-foreground/50 shrink-0" />
+        <input
+          value={searchQuery}
+          onChange={(e) => onSearchChange(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Escape") onSearchChange(""); }}
+          placeholder="Search..."
+          className="bg-transparent text-[0.65rem] text-foreground placeholder:text-muted-foreground/40 outline-none w-24"
+        />
       </div>
-    </TooltipProvider>
+
+      <div className="h-4 w-px bg-border mx-0.5" />
+
+      <button
+        type="button"
+        className="rounded-full p-1 text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-all"
+        onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+      >
+        {mounted && theme === "dark" ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />}
+      </button>
+    </div>
+  );
+}
+
+/* ── Panel open button (visible when closed, hidden when open) ── */
+function PanelOpenButton({
+  side,
+  open,
+  onToggle,
+  icon,
+}: {
+  side: "left" | "right";
+  open: boolean;
+  onToggle: () => void;
+  icon: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={cn(
+        "panel-open-btn fixed top-4 z-30 grid place-items-center size-10 rounded-full cursor-pointer",
+        "transition-all duration-300",
+        side === "left" ? "left-4" : "right-4",
+        open && "panel-open-btn--hidden"
+      )}
+      aria-label={`Open ${side} panel`}
+    >
+      {icon}
+    </button>
   );
 }
 
@@ -685,7 +771,7 @@ export function PlannerShell() {
   const [rightOpen, setRightOpen] = useState(false);
   const { resolvedTheme } = useTheme();
   const [introPhase, setIntroPhase] = useState<
-    "welcome" | "map" | "chat" | "typing" | "done"
+    "welcome" | "windy" | "map" | "chat" | "typing" | "done"
   >("welcome");
   const [typedChars, setTypedChars] = useState(0);
 
@@ -698,10 +784,11 @@ export function PlannerShell() {
   }, []);
 
   useEffect(() => {
-    const t1 = setTimeout(() => setIntroPhase("map"), 2000);
+    const t0 = setTimeout(() => setIntroPhase("windy"), 1500);
+    const t1 = setTimeout(() => setIntroPhase("map"), 2200);
     const t2 = setTimeout(() => { setIntroPhase("chat"); setRightOpen(true); }, 3000);
     const t3 = setTimeout(() => setIntroPhase("typing"), 3500);
-    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+    return () => { clearTimeout(t0); clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
   }, []);
 
   useEffect(() => {
@@ -884,18 +971,27 @@ export function PlannerShell() {
   return (
     <main className="shell">
       {/* welcome overlay */}
-      {(introPhase === "welcome" || introPhase === "map") && (
-        <div className={`intro-overlay${introPhase === "map" ? " intro-overlay--exit" : ""}`}>
+      {/* welcome overlay */}
+      {(introPhase === "welcome" || introPhase === "windy" || introPhase === "map") && (
+        <div className={cn(
+          "intro-overlay",
+          introPhase === "map" && "intro-overlay--exit"
+        )}>
           <div className="intro-overlay__glow" />
           <div className="intro-overlay__agent">
-            <AgentIcon className="intro-overlay__icon" />
+            {introPhase === "windy" ? (
+              <AgentIconWindy className="intro-overlay__icon" />
+            ) : (
+              <AgentIcon className="intro-overlay__icon" />
+            )}
           </div>
           <p className="intro-overlay__name">Mappy</p>
         </div>
       )}
 
+
       {/* map */}
-      <div className={`map-canvas${introPhase === "welcome" ? " intro-map-hidden" : " intro-map"}`}>
+      <div className={`map-canvas${(introPhase === "welcome" || introPhase === "windy") ? " intro-map-hidden" : " intro-map"}`}>
         <RouteMap
           stops={itinerary?.stops ?? []}
           previewSpots={itinerary ? itinerary.candidates : []}
@@ -911,21 +1007,29 @@ export function PlannerShell() {
       </div>
 
       {/* floating pill menu */}
-      <div className={introPhase === "welcome" || introPhase === "map" ? "hidden" : ""}>
+      <div className={introPhase === "welcome" || introPhase === "windy" || introPhase === "map" ? "hidden" : ""}>
         <FloatingPill
           activeCategory={categoryFilter}
           onCategoryChange={setCategoryFilter}
           searchQuery={venueSearch}
           onSearchChange={setVenueSearch}
-          leftOpen={leftOpen}
-          rightOpen={rightOpen}
-          onToggleLeft={() => setLeftOpen((v) => !v)}
-          onToggleRight={() => setRightOpen((v) => !v)}
         />
+
+        {/* Panel open buttons — visible when closed, hidden when open */}
+        <PanelOpenButton side="left" open={leftOpen} onToggle={() => setLeftOpen(true)} icon={<MapPin className="size-4" />} />
+        <PanelOpenButton side="right" open={rightOpen} onToggle={() => setRightOpen(true)} icon={<MessageCircle className="size-4" />} />
       </div>
 
       {/* ── LEFT: workspace ────────────────────────────────── */}
       <aside className={`glass-panel glass-panel--left ${leftOpen ? "" : "glass-panel--collapsed-left"}`}>
+        <button
+          type="button"
+          onClick={() => setLeftOpen(false)}
+          className="panel-close-corner panel-close-corner--left"
+          aria-label="Close places panel"
+        >
+          <ArrowUpRight className="size-2.5 rotate-[-90deg]" />
+        </button>
         <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide">
           <div className="p-5 space-y-5">
 
@@ -1115,6 +1219,14 @@ export function PlannerShell() {
 
       {/* ── RIGHT: chat ────────────────────────────────────── */}
       <aside className={`glass-panel glass-panel--right flex flex-col ${rightOpen ? "" : "glass-panel--collapsed-right"}`}>
+        <button
+          type="button"
+          onClick={() => setRightOpen(false)}
+          className="panel-close-corner panel-close-corner--right"
+          aria-label="Close chat panel"
+        >
+          <ArrowUpRight className="size-2.5" />
+        </button>
         {/* conversation */}
         <Conversation className="flex-1 min-h-0">
           <ConversationContent className="gap-5 px-5 py-5">
@@ -1131,13 +1243,17 @@ export function PlannerShell() {
               ) : (
                 <div key={m.id} className="chat-msg flex items-start gap-3">
                   <div className="shrink-0 mt-0.5 grid place-items-center size-7">
-                    <AgentIcon className="size-6" />
+                    {m.id === "welcome" && (introPhase === "chat" || introPhase === "typing") ? (
+                      <AgentIconWindy className="size-6" />
+                    ) : (
+                      <AgentIcon className="size-6" />
+                    )}
                   </div>
                   {m.id === "welcome" && introPhase === "chat" ? (
-                    <div className="flex items-center gap-1.5 h-7 mt-1">
-                      <span className="chat-dot" />
-                      <span className="chat-dot" />
-                      <span className="chat-dot" />
+                    <div className="leaf-wind h-7 mt-1">
+                      <span className="leaf-wind__leaf">🍃</span>
+                      <span className="leaf-wind__leaf">🍃</span>
+                      <span className="leaf-wind__leaf">🍃</span>
                     </div>
                   ) : (
                     <div className="min-w-0 flex-1">
@@ -1158,12 +1274,12 @@ export function PlannerShell() {
             {isBusy && visibleMessages[visibleMessages.length - 1]?.role !== "assistant" && (
               <div className="chat-msg flex items-start gap-3">
                 <div className="shrink-0 mt-0.5 grid place-items-center size-7">
-                  <AgentIcon className="size-6" />
+                  <AgentIconWindy className="size-6" />
                 </div>
-                <div className="flex items-center gap-1.5 pt-0.5">
-                  <span className="chat-dot" />
-                  <span className="chat-dot" />
-                  <span className="chat-dot" />
+                <div className="leaf-wind h-7 mt-1">
+                  <span className="leaf-wind__leaf">🍃</span>
+                  <span className="leaf-wind__leaf">🍃</span>
+                  <span className="leaf-wind__leaf">🍃</span>
                 </div>
               </div>
             )}

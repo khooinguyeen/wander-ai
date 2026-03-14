@@ -65,7 +65,7 @@ export async function buildItinerary(request: PlanRequest): Promise<ItineraryRes
   // Collect directions data as the agent calls getDirections
   const directionsCache: Record<string, { distanceKm: number; durationMinutes: number; summary: string }> = {};
 
-  const model = process.env.GEMINI_MODEL || "gemini-2.0-flash-lite";
+  const model = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite-preview";
 
   const { toolResults } = await generateText({
     model: google(model),

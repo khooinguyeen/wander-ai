@@ -47,7 +47,7 @@ Your job is to collect enough info from the user to plan a great day route, then
 export async function POST(req: Request) {
   const { messages }: { messages: UIMessage[] } = await req.json();
 
-  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
+  const model = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite-preview";
 
   const result = streamText({
     model: google(model),
