@@ -13,15 +13,18 @@ def main():
     enricher = GooglePlacesEnricher()
     stats = enricher.enrich_all_in_place(fb_results)
 
-    # save all items, including both enriched and unenrichable
-    with open(output_file, "w", encoding="utf-8") as f:
-        json.dump(fb_results, f, indent=2, ensure_ascii=False)
+    enriched_items = [
+        item for item in fb_results
+        if item.get("google_match_found", False)
+    ]
 
-    # keep only items that failed enrichment
     not_enrichable = [
         item for item in fb_results
         if not item.get("google_match_found", False)
     ]
+
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(enriched_items, f, indent=2, ensure_ascii=False)
 
     with open(failed_file, "w", encoding="utf-8") as f:
         json.dump(not_enrichable, f, indent=2, ensure_ascii=False)
@@ -29,8 +32,8 @@ def main():
     print(f"Saved enriched data to: {output_file}")
     print(f"Saved not enrichable data to: {failed_file}")
     print(f"Total data points: {stats['total']}")
-    print(f"Enriched: {stats['enriched']}")
-    print(f"Not enrichable: {stats['not_enrichable']}")
+    print(f"Enriched: {len(enriched_items)}")
+    print(f"Not enrichable: {len(not_enrichable)}")
 
 
 if __name__ == "__main__":
