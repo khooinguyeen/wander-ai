@@ -1,0 +1,191 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: oklch(0.14 0.005 285);
+  --color-foreground: oklch(0.95 0.01 260);
+  --color-card: oklch(0.17 0.005 285);
+  --color-card-foreground: oklch(0.95 0.01 260);
+  --color-popover: oklch(0.17 0.005 285);
+  --color-popover-foreground: oklch(0.95 0.01 260);
+  --color-primary: oklch(0.62 0.15 255);
+  --color-primary-foreground: oklch(0.98 0 0);
+  --color-secondary: oklch(0.22 0.01 285);
+  --color-secondary-foreground: oklch(0.9 0.01 260);
+  --color-muted: oklch(0.22 0.01 285);
+  --color-muted-foreground: oklch(0.65 0.015 260);
+  --color-accent: oklch(0.25 0.015 285);
+  --color-accent-foreground: oklch(0.95 0.01 260);
+  --color-destructive: oklch(0.55 0.2 25);
+  --color-destructive-foreground: oklch(0.98 0 0);
+  --color-border: oklch(0.25 0.005 285);
+  --color-input: oklch(0.25 0.005 285);
+  --color-ring: oklch(0.62 0.15 255);
+  --color-chart-1: oklch(0.62 0.15 255);
+  --color-chart-2: oklch(0.7 0.18 160);
+  --color-chart-3: oklch(0.75 0.15 85);
+  --color-chart-4: oklch(0.65 0.2 330);
+  --color-chart-5: oklch(0.7 0.2 25);
+  --color-sidebar: oklch(0.14 0.005 285);
+  --color-sidebar-foreground: oklch(0.95 0.01 260);
+  --color-sidebar-primary: oklch(0.62 0.15 255);
+  --color-sidebar-primary-foreground: oklch(0.98 0 0);
+  --color-sidebar-accent: oklch(0.25 0.015 285);
+  --color-sidebar-accent-foreground: oklch(0.95 0.01 260);
+  --color-sidebar-border: oklch(0.25 0.005 285);
+  --color-sidebar-ring: oklch(0.62 0.15 255);
+  --radius: 0.625rem;
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body {
+  @apply bg-background text-foreground;
+  font-family: var(--font-sans), -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  position: relative;
+  width: 100%;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+/* ── map (full bleed behind everything) ────────────────────── */
+.map-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+.map-canvas .fallback-map,
+.map-canvas > div { width: 100%; height: 100%; }
+
+/* ── glass panel overlay base ──────────────────────────────── */
+.glass-panel {
+  --panel-gap: clamp(12px, 1.6vw, 20px);
+  --panel-w: min(380px, 36vw);
+  position: absolute;
+  top: var(--panel-gap);
+  bottom: var(--panel-gap);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  width: var(--panel-w);
+  border-radius: 1.25rem;
+  border: 1px solid oklch(0.3 0.005 285 / 0.6);
+  background: oklch(0.13 0.005 285 / 0.72);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  box-shadow: 0 24px 80px oklch(0 0 0 / 0.5);
+  overflow: hidden;
+}
+.glass-panel--left { left: var(--panel-gap); }
+.glass-panel--right { right: var(--panel-gap); }
+
+/* ── Google Maps markers (rendered inside AdvancedMarker) ─── */
+.gmap-marker {
+  @apply grid place-items-center font-mono text-xs font-bold text-white select-none cursor-pointer;
+  width: 32px; height: 32px;
+  border-radius: 50% 50% 50% 6px;
+  transform: rotate(-45deg);
+  background: linear-gradient(145deg, oklch(0.62 0.15 255), oklch(0.7 0.14 255));
+  box-shadow: 0 4px 12px oklch(0 0 0 / 0.4);
+}
+.gmap-marker > * { transform: rotate(45deg); }
+.gmap-marker--active {
+  background: linear-gradient(145deg, oklch(0.2 0.01 240), oklch(0.32 0.01 240));
+  width: 38px; height: 38px;
+  box-shadow: 0 6px 20px oklch(0 0 0 / 0.6);
+}
+.gmap-marker--preview {
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  transform: none;
+  background: oklch(0.7 0.18 160);
+  box-shadow: 0 0 0 4px oklch(0.7 0.18 160 / 0.2), 0 4px 12px oklch(0 0 0 / 0.3);
+}
+
+/* ── fallback map (no API key) ─────────────────────────────── */
+.fallback-map {
+  @apply relative w-full h-full overflow-hidden;
+  background:
+    radial-gradient(circle at 30% 40%, oklch(0.62 0.15 255 / 0.06), transparent 50%),
+    radial-gradient(circle at 70% 60%, oklch(0.7 0.18 160 / 0.05), transparent 40%),
+    linear-gradient(180deg, oklch(0.14 0.005 285), oklch(0.11 0.005 285));
+}
+
+.fallback-map__notice {
+  @apply absolute top-4 left-1/2 -translate-x-1/2 z-5 px-3.5 py-2 rounded-xl text-xs text-muted-foreground whitespace-nowrap;
+  background: oklch(0.13 0.005 285 / 0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid oklch(0.3 0.005 285 / 0.6);
+}
+.fallback-map__notice code { @apply font-mono text-primary; }
+
+.fallback-map__routes {
+  @apply absolute inset-0 w-full h-full;
+}
+
+.fallback-pin {
+  @apply absolute border-none cursor-pointer z-2;
+  transform: translate(-50%, -50%);
+  transition: transform 140ms;
+}
+.fallback-pin:hover { transform: translate(-50%, -50%) scale(1.15); }
+
+.fallback-pin--stop {
+  @apply grid place-items-center font-mono text-xs font-bold text-white;
+  width: 30px; height: 30px;
+  border-radius: 50% 50% 50% 4px;
+  background: linear-gradient(145deg, oklch(0.62 0.15 255), oklch(0.7 0.14 255));
+  box-shadow: 0 4px 16px oklch(0 0 0 / 0.5);
+}
+
+.fallback-pin--preview {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: oklch(0.7 0.18 160);
+  box-shadow: 0 0 0 4px oklch(0.7 0.18 160 / 0.18), 0 4px 12px oklch(0 0 0 / 0.3);
+}
+
+.fallback-pin--active {
+  background: linear-gradient(145deg, oklch(0.2 0.01 240), oklch(0.32 0.01 240));
+  box-shadow: 0 6px 20px oklch(0 0 0 / 0.6);
+  transform: translate(-50%, -50%) scale(1.2);
+}
+
+/* ── responsive ────────────────────────────────────────────── */
+@media (max-width: 1100px) {
+  .glass-panel { --panel-w: min(340px, 38vw); }
+}
+
+@media (max-width: 900px) {
+  .glass-panel { --panel-w: min(320px, 44vw); }
+}
+
+@media (max-width: 700px) {
+  .glass-panel {
+    --panel-gap: 10px;
+    position: fixed;
+    top: auto;
+    left: var(--panel-gap);
+    right: var(--panel-gap);
+    bottom: var(--panel-gap);
+    width: auto;
+    max-height: 55dvh;
+  }
+  .glass-panel--left { z-index: 12; }
+  .glass-panel--right { z-index: 11; bottom: calc(55dvh + var(--panel-gap) * 2); max-height: 35dvh; }
+}
