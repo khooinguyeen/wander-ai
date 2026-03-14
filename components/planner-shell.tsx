@@ -1,10 +1,12 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport } from "ai";
+import { useTheme } from "next-themes";
 import {
   ArrowUpRight,
-  Bot,
   Car,
   CheckCircle2,
   Circle,
@@ -12,14 +14,19 @@ import {
   Footprints,
   Loader2,
   LocateFixed,
-  Navigation,
+  Moon,
   Route,
   Search,
+  Sun,
   Train,
-  User,
   Waypoints
 } from "lucide-react";
 
+import {
+  Conversation,
+  ConversationContent,
+  ConversationScrollButton
+} from "@/components/ai-elements/conversation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,52 +37,55 @@ import {
   CardTitle
 } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import spotsData from "@/data/melbourne-spots.sample.json";
-import type { ItineraryResponse, PlannedStop, Spot, TravelMode } from "@/lib/types";
+import type {
+  ItineraryResponse,
+  PlannedStop,
+  Spot,
+  TravelMode
+} from "@/lib/types";
 
 const RouteMap = dynamic(
   () => import("@/components/route-map").then((mod) => mod.RouteMap),
   { ssr: false, loading: () => <div className="fallback-map" /> }
 );
 
-const PROMPTS = [
-  "lowkey northside day with coffee, a lookout, and one fashion stop",
-  "southside brunch then sunset lookout for a date",
-  "CBD fashion and food route for someone visiting Melbourne",
-  "best lowkey fashion stores and lunch spots around Fitzroy"
-];
-const START_LOCATIONS = ["Collingwood", "Fitzroy", "CBD", "St Kilda"];
-const STOP_OPTIONS = [3, 4, 5, 6];
 const PREVIEW_SPOTS = spotsData as Spot[];
 const HAS_GOOGLE_MAPS = Boolean(process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY);
 
-type PlanPayload = { query: string; startLocation: string; travelMode: TravelMode; maxStops: number };
-type ChatMessage = { id: string; role: "assistant" | "user"; title: string; body: string; meta?: string };
-type IntakeStep = "query" | "startLocation" | "travelMode" | "maxStops" | "complete";
-type WorkspacePhase = "idle" | "briefing" | "planning" | "ready" | "error";
-
-const INITIAL_MESSAGES: ChatMessage[] = [
-  { id: "welcome", role: "assistant", title: "Scout", body: "What kind of day are you planning? Give me the vibe, suburb, or a must-have stop.", meta: "I'll ask a few short questions, then build the route." }
+const SUGGESTIONS = [
+  "lowkey northside day with coffee and a lookout",
+  "southside brunch then sunset for a date",
+  "CBD fashion and food route for a visitor",
+  "lunch and fashion stores around Fitzroy"
 ];
 
-function statLabel(mode: ItineraryResponse["queryMode"]) {
-  return mode === "ai" ? "Gemini planned" : "Heuristic fallback";
+const WELCOME_PROMPTS = [
+  "Hey! What kind of day are you planning? Give me the vibe — brunch crawl, date day, shopping + coffee, whatever you're feeling.",
+  "G'day! Planning a Melbourne day out? Tell me what you're in the mood for and I'll sort a route.",
+  "What's the plan for today? Coffee and lookouts, food crawl, fashion stops — give me something to work with.",
+  "Alright, let's build you a day. What are you keen for — lowkey eats, a shopping loop, sunset vibes?",
+  "Hey! Where are we headed today? Drop me a vibe and I'll put together the route.",
+  "Ready to plan something good. What's the brief — brunch and shopping, date day, local hidden gems?",
+  "What sort of day are we building? Tell me the vibe and I'll find the spots.",
+  "Let's get into it. What are you after today — food, fashion, scenic stuff, or a mix of everything?"
+];
+
+function getRandomWelcome() {
+  return WELCOME_PROMPTS[Math.floor(Math.random() * WELCOME_PROMPTS.length)];
 }
+
+/* ── helpers ───────────────────────────────────────────────── */
+
 function prettyMode(mode: TravelMode) {
   return mode.charAt(0).toUpperCase() + mode.slice(1);
-}
-function createMessage(input: Omit<ChatMessage, "id">): ChatMessage {
-  return { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, ...input };
-}
-function buildAssistantMessage(it: ItineraryResponse): Omit<ChatMessage, "id"> {
-  return {
-    role: "assistant",
-    title: it.dayTheme,
-    body: `${it.summary} Stops: ${it.stops.map((s) => s.spot.name).join(" → ")}.`,
-    meta: `${statLabel(it.queryMode)} · ${it.route.totalTravelMinutes} min · ${it.route.totalDistanceKm} km`
-  };
 }
 
 function ModeIcon({ mode }: { mode: TravelMode }) {
@@ -84,224 +94,364 @@ function ModeIcon({ mode }: { mode: TravelMode }) {
   return <Car className="size-3" />;
 }
 
-function questionForStep(step: Exclude<IntakeStep, "complete">): Omit<ChatMessage, "id"> {
-  const map: Record<typeof step, Omit<ChatMessage, "id">> = {
-    query: { role: "assistant", title: "Scout", body: "What kind of day are you planning? Give me the vibe, suburb, or a must-have stop.", meta: "I'll ask a few short questions, then build the route." },
-    startLocation: { role: "assistant", title: "Scout", body: "Where should the route start from?", meta: "A suburb or landmark is enough." },
-    travelMode: { role: "assistant", title: "Scout", body: "How do you want to move between stops?", meta: "This shapes the route distances." },
-    maxStops: { role: "assistant", title: "Scout", body: "How many stops should I keep it to?", meta: "I'll keep the route compact." }
-  };
-  return map[step];
+/** Extract text content from a v5 UIMessage */
+function getMessageText(msg: { parts: Array<{ type: string; text?: string }> }): string {
+  return msg.parts
+    .filter((p): p is { type: "text"; text: string } => p.type === "text" && !!p.text)
+    .map((p) => p.text)
+    .join("");
 }
 
-/* ── Chat bubble ───────────────────────────────────────────── */
-function ChatBubble({ message }: { message: ChatMessage }) {
-  const isUser = message.role === "user";
+/* ── Floating pill menu ───────────────────────────────────── */
+function FloatingPill() {
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   return (
-    <div className="flex gap-2.5 items-start">
-      <div className={cn(
-        "grid place-items-center size-7 rounded-lg shrink-0",
-        isUser ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"
-      )}>
-        {isUser ? <User className="size-3.5" /> : <Bot className="size-3.5" />}
+    <TooltipProvider delayDuration={200}>
+      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 px-1.5 py-1 rounded-full border border-border/50 bg-background/80 backdrop-blur-xl shadow-lg">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="rounded-full"
+              disabled
+            >
+              <Waypoints className="size-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Scout Map</TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="rounded-full"
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            >
+              {mounted && theme === "dark" ? (
+                <Sun className="size-3.5" />
+              ) : (
+                <Moon className="size-3.5" />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {mounted && theme === "dark" ? "Light mode" : "Dark mode"}
+          </TooltipContent>
+        </Tooltip>
       </div>
-      <div className={cn(
-        "flex-1 rounded-xl border px-3 py-2.5",
-        isUser ? "bg-primary/8 border-primary/15" : "bg-card/50 border-border"
-      )}>
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-sm font-semibold">{message.title}</span>
-          {message.meta && <span className="text-[0.68rem] text-muted-foreground">{message.meta}</span>}
-        </div>
-        <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{message.body}</p>
-      </div>
-    </div>
+    </TooltipProvider>
   );
 }
 
 /* ── Stop card ─────────────────────────────────────────────── */
-function StopCard({ stop, index, active, onSelect }: { stop: PlannedStop; index: number; active: boolean; onSelect: (id: string) => void }) {
+function StopCard({
+  stop,
+  index,
+  active,
+  onSelect
+}: {
+  stop: PlannedStop;
+  index: number;
+  active: boolean;
+  onSelect: (id: string) => void;
+}) {
   return (
     <button
       type="button"
       onClick={() => onSelect(stop.spot.id)}
       className={cn(
-        "grid grid-cols-[36px_1fr] gap-3 p-3 rounded-xl border text-left transition-colors cursor-pointer",
-        active ? "border-primary/30 bg-primary/8" : "border-border bg-transparent hover:bg-muted/50"
+        "grid grid-cols-[36px_1fr] gap-3 p-3 rounded-xl border text-left transition-all cursor-pointer",
+        active
+          ? "border-primary/40 bg-primary/8 shadow-sm"
+          : "border-border/40 bg-transparent hover:bg-muted/40"
       )}
     >
-      <div className="grid place-items-center size-9 rounded-lg bg-linear-to-br from-primary to-primary/70 text-primary-foreground font-bold font-mono text-xs">
+      <div className="grid place-items-center size-9 rounded-lg bg-primary text-primary-foreground font-bold font-mono text-xs">
         {String(index + 1).padStart(2, "0")}
       </div>
       <div className="space-y-1 min-w-0">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-muted-foreground">{stop.arrivalTime}</span>
-          <span className="text-xs text-muted-foreground">
-            {stop.legFromPreviousMinutes > 0 ? `${stop.legFromPreviousMinutes} min · ${stop.legDistanceKm} km` : "Route start"}
+          <span className="text-[0.65rem] text-muted-foreground">
+            {stop.arrivalTime}
+          </span>
+          <span className="text-[0.65rem] text-muted-foreground">
+            {stop.legFromPreviousMinutes > 0
+              ? `${stop.legFromPreviousMinutes} min · ${stop.legDistanceKm} km`
+              : "Route start"}
           </span>
         </div>
         <h3 className="text-sm font-semibold truncate">{stop.spot.name}</h3>
-        <p className="text-xs text-muted-foreground">{stop.spot.area} · {stop.spot.kind} · {stop.spot.priceBand ?? "Free"}</p>
-        <p className="text-xs text-muted-foreground/80 leading-relaxed">{stop.reason}</p>
+        <p className="text-[0.65rem] text-muted-foreground">
+          {stop.spot.area} · {stop.spot.kind} · {stop.spot.priceBand ?? "Free"}
+        </p>
+        <p className="text-[0.65rem] text-muted-foreground/70 leading-relaxed">
+          {stop.reason}
+        </p>
       </div>
     </button>
   );
 }
 
+/* ── v5 chat transport (stable ref) ────────────────────────── */
+const chatTransport = new DefaultChatTransport({ api: "/api/chat" });
+
 /* ── Main shell ────────────────────────────────────────────── */
 export function PlannerShell() {
-  const [query, setQuery] = useState("");
-  const [startLocation, setStartLocation] = useState("");
-  const [travelMode, setTravelMode] = useState<TravelMode>("driving");
-  const [maxStops, setMaxStops] = useState(4);
-  const [chatInput, setChatInput] = useState("");
-  const [chatStep, setChatStep] = useState<IntakeStep>("query");
-  const [workspacePhase, setWorkspacePhase] = useState<WorkspacePhase>("idle");
-  const [itinerary, setItinerary] = useState<ItineraryResponse | null>(null);
   const [activeStopId, setActiveStopId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
-  const [error, setError] = useState("");
-  const [isPending, startTransition] = useTransition();
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  const [welcomeMsg] = useState(getRandomWelcome);
+  const [input, setInput] = useState("");
+  const { resolvedTheme } = useTheme();
 
-  useEffect(() => { if (itinerary?.stops.length) setActiveStopId(itinerary.stops[0].spot.id); }, [itinerary]);
-  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+  // v5 useChat — transport-based, sendMessage API
+  const { messages, sendMessage, status } = useChat({
+    transport: chatTransport,
+    messages: [
+      {
+        id: "welcome",
+        role: "assistant",
+        parts: [{ type: "text", text: welcomeMsg }]
+      }
+    ]
+  });
 
-  const activeStop = itinerary?.stops.find((s) => s.spot.id === activeStopId) ?? itinerary?.stops[0] ?? null;
-  const canSubmit = chatInput.trim().length >= 2;
+  const isBusy = status === "submitted" || status === "streaming";
 
-  async function fetchPlan(p: PlanPayload) {
-    const res = await fetch("/api/plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) });
-    if (!res.ok) { const b = (await res.json().catch(() => null)) as { error?: string } | null; throw new Error(b?.error || "Could not build itinerary."); }
-    return (await res.json()) as ItineraryResponse;
-  }
+  // Extract itinerary from tool parts (v5: type is "tool-buildRoute")
+  const itinerary = useMemo<ItineraryResponse | null>(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      for (const part of messages[i].parts) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const p = part as any;
+        if (p.type === "tool-buildRoute" && p.state === "output-available") {
+          return p.output as ItineraryResponse;
+        }
+      }
+    }
+    return null;
+  }, [messages]);
 
-  function append(entries: Array<Omit<ChatMessage, "id">>) {
-    setMessages((cur) => [...cur, ...entries.map(createMessage)]);
-  }
+  // Extract plan params from tool input
+  const planParams = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      for (const part of messages[i].parts) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const p = part as any;
+        if (p.type === "tool-buildRoute" && p.input) {
+          return p.input as {
+            query?: string;
+            startLocation?: string;
+            travelMode?: TravelMode;
+            maxStops?: number;
+          };
+        }
+      }
+    }
+    return null;
+  }, [messages]);
 
-  function runPlan(p: PlanPayload) {
-    setError(""); setWorkspacePhase("planning"); setItinerary(null); setActiveStopId(null);
-    startTransition(() => {
-      void fetchPlan(p)
-        .then((d) => { setItinerary(d); setWorkspacePhase("ready"); append([buildAssistantMessage(d)]); })
-        .catch((e: unknown) => {
-          const m = e instanceof Error ? e.message : "Could not build itinerary.";
-          setError(m); setWorkspacePhase("error");
-          append([{ role: "assistant", title: "Route unavailable", body: m, meta: "Check config" }]);
-        });
-    });
-  }
+  // Is the tool currently executing?
+  const isPlanning = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      for (const part of messages[i].parts) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const p = part as any;
+        if (
+          p.type === "tool-buildRoute" &&
+          (p.state === "input-available" || p.state === "input-streaming")
+        ) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }, [messages]);
 
-  function reset() {
-    setQuery(""); setStartLocation(""); setTravelMode("driving"); setMaxStops(4); setChatInput(""); setChatStep("query");
-    setWorkspacePhase("idle"); setItinerary(null); setActiveStopId(null); setError(""); setMessages(INITIAL_MESSAGES);
-  }
+  useEffect(() => {
+    if (itinerary?.stops.length) setActiveStopId(itinerary.stops[0].spot.id);
+  }, [itinerary]);
 
-  function handleTextAnswer() {
-    const a = chatInput.trim(); if (!a) return;
-    if (chatStep === "query") { setQuery(a); setChatInput(""); setChatStep("startLocation"); setWorkspacePhase("briefing"); append([{ role: "user", title: "Trip brief", body: a }, questionForStep("startLocation")]); return; }
-    if (chatStep === "startLocation") { setStartLocation(a); setChatInput(""); setChatStep("travelMode"); setWorkspacePhase("briefing"); append([{ role: "user", title: "Starting point", body: a }, questionForStep("travelMode")]); }
-  }
+  const activeStop =
+    itinerary?.stops.find((s) => s.spot.id === activeStopId) ??
+    itinerary?.stops[0] ??
+    null;
 
-  function handleMode(m: TravelMode) {
-    setTravelMode(m); setChatStep("maxStops"); setWorkspacePhase("briefing");
-    append([{ role: "user", title: "Travel mode", body: prettyMode(m) }, questionForStep("maxStops")]);
-  }
+  const workspacePhase = itinerary
+    ? "ready"
+    : isPlanning
+      ? "planning"
+      : planParams
+        ? "briefing"
+        : messages.length > 1
+          ? "briefing"
+          : "idle";
 
-  function handleStops(n: number) {
-    const p: PlanPayload = { query, startLocation, travelMode, maxStops: n };
-    setMaxStops(n); setChatStep("complete");
-    append([
-      { role: "user", title: "Stop count", body: `${n} stops` },
-      { role: "assistant", title: "Working it out", body: "Enough info. Watch the workspace while I rank spots and build the route.", meta: HAS_GOOGLE_MAPS ? "Google Maps ready" : "Map key missing" }
-    ]);
-    runPlan(p);
-  }
-
-  function handleChip(opt: string) {
-    if (chatStep === "query") { setQuery(opt); setChatInput(""); setChatStep("startLocation"); setWorkspacePhase("briefing"); append([{ role: "user", title: "Trip brief", body: opt }, questionForStep("startLocation")]); }
-    else { setStartLocation(opt); setChatInput(""); setChatStep("travelMode"); setWorkspacePhase("briefing"); append([{ role: "user", title: "Starting point", body: opt }, questionForStep("travelMode")]); }
-  }
+  const query = planParams?.query ?? "";
+  const startLocation = planParams?.startLocation ?? "";
+  const travelMode: TravelMode = planParams?.travelMode ?? "driving";
+  const maxStops = planParams?.maxStops ?? 4;
 
   const steps = [
-    { label: "Capturing brief", detail: query || "Waiting for first answer.", done: workspacePhase !== "idle", active: workspacePhase === "idle" },
-    { label: "Locking start point", detail: startLocation || "Next answer fills this.", done: !!startLocation, active: !startLocation && workspacePhase === "briefing" },
-    { label: "Ranking spots", detail: itinerary ? `${itinerary.candidates.length} matches.` : isPending ? "Searching..." : "After intake.", done: workspacePhase === "ready", active: workspacePhase === "planning" },
-    { label: "Projecting route", detail: itinerary ? "Synced." : HAS_GOOGLE_MAPS ? "Maps ready." : "Set API key for map.", done: workspacePhase === "ready", active: workspacePhase === "error" }
+    {
+      label: "Capturing brief",
+      detail: query || "Chatting to understand the vibe.",
+      done: workspacePhase !== "idle",
+      active: workspacePhase === "idle"
+    },
+    {
+      label: "Locking start point",
+      detail: startLocation || "AI is still asking.",
+      done: !!startLocation,
+      active: !startLocation && workspacePhase === "briefing"
+    },
+    {
+      label: "Ranking spots",
+      detail: itinerary
+        ? `${itinerary.candidates.length} matches.`
+        : isPlanning
+          ? "Searching the dataset..."
+          : "After intake.",
+      done: workspacePhase === "ready",
+      active: workspacePhase === "planning"
+    },
+    {
+      label: "Projecting route",
+      detail: itinerary
+        ? "Stops and route synced."
+        : HAS_GOOGLE_MAPS
+          ? "Google Maps ready."
+          : "Set API key for map.",
+      done: workspacePhase === "ready",
+      active: false
+    }
   ];
+
+  // Only show messages that have visible text
+  const visibleMessages = messages.filter((m) => {
+    const text = getMessageText(m);
+    return text.trim().length > 0;
+  });
+
+  // Send handler
+  function handleSend() {
+    const text = input.trim();
+    if (!text || isBusy) return;
+    setInput("");
+    sendMessage({ text });
+  }
 
   return (
     <main className="shell">
       {/* map */}
       <div className="map-canvas">
-        <RouteMap stops={itinerary?.stops ?? []} previewSpots={itinerary ? itinerary.candidates : PREVIEW_SPOTS} activeStopId={activeStopId} onSelectStop={setActiveStopId} startLocation={startLocation} travelMode={travelMode} />
+        <RouteMap
+          stops={itinerary?.stops ?? []}
+          previewSpots={itinerary ? itinerary.candidates : PREVIEW_SPOTS}
+          activeStopId={activeStopId}
+          onSelectStop={setActiveStopId}
+          startLocation={startLocation}
+          travelMode={travelMode}
+          colorScheme={resolvedTheme === "dark" ? "DARK" : "LIGHT"}
+        />
       </div>
+
+      {/* floating pill menu */}
+      <FloatingPill />
 
       {/* ── LEFT: workspace ────────────────────────────────── */}
       <aside className="glass-panel glass-panel--left">
-        {/* header */}
         <div className="shrink-0 px-5 pt-5 pb-3">
-          <p className="text-[0.65rem] font-bold tracking-[0.14em] uppercase text-primary mb-1">Workspace</p>
-          <h1 className="text-base font-bold tracking-tight leading-snug">{itinerary ? itinerary.dayTheme : "Route will take shape here"}</h1>
+          <p className="text-[0.6rem] font-semibold tracking-[0.12em] uppercase text-primary/80 mb-1">
+            Workspace
+          </p>
+          <h1 className="text-base font-bold tracking-tight leading-snug">
+            {itinerary ? itinerary.dayTheme : "Route will take shape here"}
+          </h1>
         </div>
 
-        {/* status pills */}
         <div className="flex flex-wrap gap-1.5 px-5 pb-3">
-          <Badge variant="secondary" className="gap-1 text-[0.7rem] bg-muted/60"><Search className="size-3" />{query || "Vibe pending"}</Badge>
-          <Badge variant="secondary" className="gap-1 text-[0.7rem] bg-muted/60"><LocateFixed className="size-3" />{startLocation || "Start pending"}</Badge>
-          <Badge variant="secondary" className="gap-1 text-[0.7rem] bg-muted/60"><ModeIcon mode={travelMode} />{prettyMode(travelMode)}</Badge>
-          <Badge variant="secondary" className="gap-1 text-[0.7rem] bg-muted/60"><Route className="size-3" />{maxStops} stops</Badge>
-          {itinerary && <Badge variant="secondary" className="gap-1 text-[0.7rem] bg-muted/60"><Clock3 className="size-3" />{itinerary.route.totalTravelMinutes} min</Badge>}
+          {[
+            { icon: <Search className="size-3" />, text: query || "Vibe pending" },
+            { icon: <LocateFixed className="size-3" />, text: startLocation || "Start pending" },
+            { icon: <ModeIcon mode={travelMode} />, text: prettyMode(travelMode) },
+            { icon: <Route className="size-3" />, text: `${maxStops} stops` },
+            ...(itinerary
+              ? [{ icon: <Clock3 className="size-3" />, text: `${itinerary.route.totalTravelMinutes} min` }]
+              : [])
+          ].map((b, i) => (
+            <Badge key={i} variant="secondary" className="gap-1 text-[0.65rem]">
+              {b.icon}
+              {b.text}
+            </Badge>
+          ))}
         </div>
 
-        <Separator className="bg-border/40" />
-
-        {/* scrollable body */}
         <ScrollArea className="flex-1 min-h-0">
           <div className="p-5 space-y-5">
-            {/* planning stages */}
-            <Card className="border-border/40 bg-card/30 shadow-none">
+            <Card className="border-border/30 bg-card/40 shadow-none">
               <CardHeader className="pb-3 px-4 pt-4">
-                <CardDescription className="text-[0.65rem] font-bold tracking-[0.14em] uppercase text-primary">Planning stages</CardDescription>
-                <CardTitle className="text-sm">{workspacePhase === "planning" ? "Ranking, sequencing, projecting..." : "Live progress"}</CardTitle>
+                <CardDescription className="text-[0.6rem] font-semibold tracking-[0.12em] uppercase text-primary/80">
+                  Planning stages
+                </CardDescription>
+                <CardTitle className="text-sm font-semibold">
+                  {isPlanning
+                    ? "Ranking, sequencing, projecting..."
+                    : itinerary
+                      ? "Route complete"
+                      : "Live progress"}
+                </CardTitle>
               </CardHeader>
               <CardContent className="px-4 pb-4 space-y-0">
-                {steps.map((s, i) => (
-                  <div key={s.label} className={cn("flex gap-2.5 py-2.5", i > 0 && "border-t border-border/30")}>
+                {steps.map((s) => (
+                  <div key={s.label} className="flex gap-2.5 py-2.5">
                     <div className="shrink-0 mt-0.5">
-                      {s.done ? <CheckCircle2 className="size-4 text-emerald-400" /> : s.active ? <Loader2 className="size-4 text-primary animate-spin" /> : <Circle className="size-4 text-muted-foreground/40" />}
+                      {s.done ? (
+                        <CheckCircle2 className="size-4 text-emerald-500" />
+                      ) : s.active ? (
+                        <Loader2 className="size-4 text-primary animate-spin" />
+                      ) : (
+                        <Circle className="size-4 text-muted-foreground/30" />
+                      )}
                     </div>
                     <div>
                       <p className="text-sm font-medium">{s.label}</p>
-                      <p className="text-xs text-muted-foreground leading-relaxed">{s.detail}</p>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        {s.detail}
+                      </p>
                     </div>
                   </div>
                 ))}
               </CardContent>
             </Card>
 
-            {error && <p className="text-sm text-destructive">{error}</p>}
-
-            {/* results */}
             {itinerary ? (
               <>
-                {/* summary */}
-                <Card className="border-border/40 bg-card/30 shadow-none">
+                <Card className="border-border/30 bg-card/40 shadow-none">
                   <CardHeader className="px-4 pt-4 pb-2">
-                    <CardDescription className="text-[0.65rem] font-bold tracking-[0.14em] uppercase text-primary">Route</CardDescription>
-                    <CardTitle className="text-sm">{itinerary.dayTheme}</CardTitle>
+                    <CardDescription className="text-[0.6rem] font-semibold tracking-[0.12em] uppercase text-primary/80">
+                      Route
+                    </CardDescription>
+                    <CardTitle className="text-sm font-semibold">
+                      {itinerary.dayTheme}
+                    </CardTitle>
                   </CardHeader>
                   <CardContent className="px-4 pb-4">
-                    <p className="text-xs text-muted-foreground leading-relaxed">{itinerary.summary}</p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      {itinerary.summary}
+                    </p>
                     <div className="grid grid-cols-3 gap-2 mt-3">
                       {[
                         { label: "Travel", value: `${itinerary.route.totalTravelMinutes} min` },
                         { label: "Distance", value: `${itinerary.route.totalDistanceKm} km` },
                         { label: "Area", value: itinerary.areaSummary }
                       ].map((m) => (
-                        <div key={m.label} className="rounded-lg bg-muted/40 p-2.5">
-                          <span className="text-[0.65rem] text-muted-foreground">{m.label}</span>
+                        <div key={m.label} className="rounded-lg bg-muted/50 p-2.5">
+                          <span className="text-[0.6rem] text-muted-foreground">{m.label}</span>
                           <strong className="block text-sm font-mono mt-0.5">{m.value}</strong>
                         </div>
                       ))}
@@ -309,29 +459,41 @@ export function PlannerShell() {
                   </CardContent>
                 </Card>
 
-                {/* highlighted stop */}
                 {activeStop && (
                   <div className="text-xs text-muted-foreground space-y-0.5">
-                    <p className="text-[0.65rem] font-bold tracking-[0.14em] uppercase text-primary">Highlighted</p>
-                    <p className="text-sm font-semibold text-foreground">{activeStop.spot.name}</p>
-                    <p>{activeStop.arrivalTime} · {activeStop.spot.area} · {activeStop.spot.address}</p>
+                    <p className="text-[0.6rem] font-semibold tracking-[0.12em] uppercase text-primary/80">
+                      Highlighted
+                    </p>
+                    <p className="text-sm font-semibold text-foreground">
+                      {activeStop.spot.name}
+                    </p>
+                    <p>
+                      {activeStop.arrivalTime} · {activeStop.spot.area} ·{" "}
+                      {activeStop.spot.address}
+                    </p>
                   </div>
                 )}
 
-                {/* stops */}
                 <div>
                   <div className="flex items-center justify-between mb-2.5">
                     <h3 className="text-sm font-semibold">Stops</h3>
-                    <span className="text-xs text-muted-foreground">{itinerary.stops.length} selected</span>
+                    <span className="text-xs text-muted-foreground">
+                      {itinerary.stops.length} selected
+                    </span>
                   </div>
                   <div className="space-y-2">
                     {itinerary.stops.map((s, i) => (
-                      <StopCard key={s.spot.id} stop={s} index={i} active={activeStop?.spot.id === s.spot.id} onSelect={setActiveStopId} />
+                      <StopCard
+                        key={s.spot.id}
+                        stop={s}
+                        index={i}
+                        active={activeStop?.spot.id === s.spot.id}
+                        onSelect={setActiveStopId}
+                      />
                     ))}
                   </div>
                 </div>
 
-                {/* backups */}
                 <div>
                   <div className="flex items-center justify-between mb-2.5">
                     <h3 className="text-sm font-semibold">Backups</h3>
@@ -339,18 +501,17 @@ export function PlannerShell() {
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     {itinerary.backups.map((sp) => (
-                      <Card key={sp.id} className="border-border/40 bg-card/20 shadow-none py-0">
+                      <Card key={sp.id} className="border-border/30 bg-card/30 shadow-none py-0">
                         <CardContent className="p-3 space-y-0.5">
-                          <p className="text-[0.65rem] text-muted-foreground">{sp.kind}</p>
+                          <p className="text-[0.6rem] text-muted-foreground">{sp.kind}</p>
                           <p className="text-xs font-semibold">{sp.name}</p>
-                          <p className="text-[0.65rem] text-muted-foreground">{sp.area}</p>
+                          <p className="text-[0.6rem] text-muted-foreground">{sp.area}</p>
                         </CardContent>
                       </Card>
                     ))}
                   </div>
                 </div>
 
-                {/* candidates */}
                 <div>
                   <div className="flex items-center justify-between mb-2.5">
                     <h3 className="text-sm font-semibold">Top matches</h3>
@@ -358,26 +519,34 @@ export function PlannerShell() {
                   </div>
                   <div className="space-y-1.5">
                     {itinerary.candidates.slice(0, 6).map((c) => (
-                      <div key={c.id} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border/30">
+                      <div
+                        key={c.id}
+                        className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border/20"
+                      >
                         <div className="min-w-0">
                           <p className="text-xs font-semibold truncate">{c.name}</p>
-                          <p className="text-[0.7rem] text-muted-foreground">{c.area} · {c.kind}</p>
+                          <p className="text-[0.65rem] text-muted-foreground">
+                            {c.area} · {c.kind}
+                          </p>
                         </div>
-                        <Badge variant="outline" className="shrink-0 font-mono text-[0.65rem]">{c.matchScore}</Badge>
+                        <Badge variant="outline" className="shrink-0 font-mono text-[0.6rem]">
+                          {c.matchScore}
+                        </Badge>
                       </div>
                     ))}
                   </div>
                 </div>
 
-                {/* actions */}
-                <div className="flex gap-2">
-                  <Button size="sm" className="flex-1" asChild>
-                    <a href={itinerary.route.googleMapsUrl} target="_blank" rel="noreferrer">
-                      <ArrowUpRight className="size-3.5" />Google Maps
-                    </a>
-                  </Button>
-                  <Button size="sm" variant="outline" className="flex-1" onClick={reset}>Plan another</Button>
-                </div>
+                <Button size="sm" className="w-full" asChild>
+                  <a
+                    href={itinerary.route.googleMapsUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <ArrowUpRight className="size-3.5" />
+                    Open in Google Maps
+                  </a>
+                </Button>
               </>
             ) : (
               <div className="grid gap-3 py-10 justify-items-start">
@@ -385,7 +554,10 @@ export function PlannerShell() {
                   <Waypoints className="size-4" />
                 </div>
                 <h2 className="text-base font-bold">No route on deck yet</h2>
-                <p className="text-sm text-muted-foreground leading-relaxed">Answer the guided chat on the right and the workspace will fill with the route.</p>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  Chat with Scout on the right. Once it has enough info it will
+                  build the route automatically.
+                </p>
               </div>
             )}
           </div>
@@ -393,84 +565,102 @@ export function PlannerShell() {
       </aside>
 
       {/* ── RIGHT: chat ────────────────────────────────────── */}
-      <aside className="glass-panel glass-panel--right">
-        {/* header */}
-        <div className="shrink-0 px-5 pt-5 pb-3">
-          <p className="text-[0.65rem] font-bold tracking-[0.14em] uppercase text-primary mb-1">Chat</p>
-          <h1 className="text-base font-bold tracking-tight">Guided copilot</h1>
-          <p className="text-xs text-muted-foreground mt-1">One question at a time. The workspace fills as you answer.</p>
-        </div>
-        <Separator className="bg-border/40" />
+      <aside className="glass-panel glass-panel--right flex flex-col">
+        {/* conversation */}
+        <Conversation className="flex-1 min-h-0">
+          <ConversationContent className="gap-4 px-5 py-5">
+            {visibleMessages.map((m) => {
+              const isUser = (m.role as string) === "user";
+              return isUser ? (
+                <div key={m.id} className="chat-msg flex justify-end">
+                  <div className="max-w-[85%] rounded-2xl rounded-br-md bg-secondary/80 px-4 py-2.5">
+                    <p className="text-sm leading-relaxed text-secondary-foreground">
+                      {getMessageText(m)}
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div key={m.id} className="chat-msg flex items-start gap-2.5">
+                  <div className="shrink-0 mt-1 grid place-items-center size-6 rounded-full bg-primary/15">
+                    <Waypoints className="size-3 text-primary" />
+                  </div>
+                  <div className="min-w-0 max-w-[90%] pt-0.5">
+                    <p className="text-sm leading-relaxed text-foreground">
+                      {getMessageText(m)}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
 
-        {/* messages */}
-        <ScrollArea className="flex-1 min-h-0">
-          <div className="p-5 space-y-3">
-            {messages.map((m) => <ChatBubble key={m.id} message={m} />)}
-            <div ref={chatEndRef} />
-          </div>
-        </ScrollArea>
+            {isBusy && visibleMessages[visibleMessages.length - 1]?.role !== "assistant" && (
+              <div className="chat-msg flex items-start gap-2.5">
+                <div className="shrink-0 mt-1 grid place-items-center size-6 rounded-full bg-primary/15">
+                  <Waypoints className="size-3 text-primary" />
+                </div>
+                <div className="flex items-center gap-2 pt-1 text-sm text-muted-foreground">
+                  <span className="chat-dots flex gap-0.5">
+                    <span className="chat-dot" />
+                    <span className="chat-dot" />
+                    <span className="chat-dot" />
+                  </span>
+                </div>
+              </div>
+            )}
+          </ConversationContent>
+          <ConversationScrollButton className="bottom-2" />
+        </Conversation>
 
         {/* composer */}
-        <Separator className="bg-border/40" />
-        <div className="shrink-0 p-4 space-y-3">
-          {(chatStep === "query" || chatStep === "startLocation") && (
-            <form onSubmit={(e) => { e.preventDefault(); handleTextAnswer(); }} className="space-y-3">
-              <label className="grid gap-1.5">
-                <span className="text-xs font-medium text-muted-foreground">{chatStep === "query" ? "Describe the day" : "Enter start point"}</span>
-                <textarea
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  rows={chatStep === "query" ? 2 : 1}
-                  placeholder={chatStep === "query" ? "Coffee, a lookout, and a fashion stop that feels local" : "Collingwood"}
-                  className="w-full rounded-xl border border-border bg-muted/40 px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 outline-none resize-none focus:border-primary/40 focus:ring-2 focus:ring-primary/10 transition-colors"
-                />
-              </label>
-
-              <div className="flex gap-1.5 overflow-x-auto scrollbar-none pb-0.5">
-                {(chatStep === "query" ? PROMPTS : START_LOCATIONS).map((opt) => (
-                  <Button key={opt} type="button" variant="outline" size="xs" className="shrink-0 rounded-full" onClick={() => handleChip(opt)}>{opt}</Button>
-                ))}
-              </div>
-
-              <Button type="submit" size="sm" className="w-full" disabled={!canSubmit}>
-                <Navigation className="size-3.5" />Next
-              </Button>
-            </form>
-          )}
-
-          {chatStep === "travelMode" && (
-            <div className="grid grid-cols-3 gap-2">
-              {(["driving", "walking", "transit"] as TravelMode[]).map((m) => (
-                <Button key={m} variant="outline" size="sm" className="flex-col gap-1 h-auto py-3" onClick={() => handleMode(m)}>
-                  <ModeIcon mode={m} />
-                  <span className="text-xs font-semibold">{prettyMode(m)}</span>
-                  <span className="text-[0.65rem] text-muted-foreground">{m === "driving" ? "Cross-city" : m === "walking" ? "Local" : "Mixed"}</span>
-                </Button>
+        <div className="shrink-0 px-4 pb-4 pt-2 space-y-2.5">
+          {messages.length <= 1 && (
+            <div className="flex flex-wrap gap-1.5 px-1">
+              {SUGGESTIONS.map((s, i) => (
+                <button
+                  key={s}
+                  type="button"
+                  className="chat-suggestion rounded-full border border-border/30 px-3 py-1.5 text-[0.65rem] text-muted-foreground hover:bg-muted/30 hover:text-foreground transition-all duration-200"
+                  style={{ animationDelay: `${i * 60}ms` }}
+                  onClick={() => {
+                    sendMessage({ text: s });
+                  }}
+                >
+                  {s}
+                </button>
               ))}
             </div>
           )}
 
-          {chatStep === "maxStops" && (
-            <div className="grid grid-cols-2 gap-2">
-              {STOP_OPTIONS.map((n) => (
-                <Button key={n} variant="outline" size="sm" className="flex-col gap-0.5 h-auto py-3" onClick={() => handleStops(n)}>
-                  <span className="text-sm font-bold">{n} stops</span>
-                  <span className="text-[0.65rem] text-muted-foreground">{n <= 4 ? "Compact" : "More variety"}</span>
-                </Button>
-              ))}
-            </div>
-          )}
-
-          {chatStep === "complete" && (
-            <div className="grid grid-cols-2 gap-2">
-              <Button variant="outline" size="sm" onClick={reset}>Plan another</Button>
-              <Button size="sm" asChild disabled={!itinerary}>
-                <a href={itinerary?.route.googleMapsUrl ?? "#"} target={itinerary ? "_blank" : undefined} rel="noreferrer">
-                  {itinerary ? "Open in Maps" : "Building..."}
-                </a>
-              </Button>
-            </div>
-          )}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSend();
+            }}
+            className="flex items-end gap-2 rounded-2xl border border-border/30 px-4 py-3 transition-colors focus-within:border-border/60"
+          >
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Message Scout..."
+              rows={1}
+              disabled={isBusy}
+              className="flex-1 min-h-[1.4rem] max-h-28 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground/40 outline-none"
+              style={{ fieldSizing: "content" } as React.CSSProperties}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+            />
+            <button
+              type="submit"
+              disabled={isBusy || !input.trim()}
+              className="shrink-0 grid place-items-center size-7 rounded-lg bg-foreground/90 text-background disabled:opacity-20 hover:bg-foreground transition-all duration-150"
+            >
+              <ArrowUpRight className="size-3.5" />
+            </button>
+          </form>
         </div>
       </aside>
     </main>
