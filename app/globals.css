@@ -153,6 +153,25 @@ body {
   --color-ring: oklch(0.78 0.12 252);
 }
 
+/* Dark theme: force white text + stronger palette for contrast */
+.dark .glass-panel {
+  color: oklch(1 0 0);
+  background: oklch(0.1 0.005 285 / 0.85);    /* more opaque = darker panel */
+  --color-secondary: oklch(0.28 0.006 285);     /* dark grey badge background */
+}
+
+/* Force Tailwind text utilities to use white palette inside glass panels (dark theme only).
+   Needed because @theme inline compiles hardcoded color values into utilities,
+   bypassing CSS variable overrides. Higher specificity wins. */
+.dark .glass-panel .text-foreground,
+.dark .glass-panel .text-card-foreground,
+.dark .glass-panel .text-popover-foreground,
+.dark .glass-panel .text-accent-foreground { color: oklch(1 0 0); }
+
+.dark .glass-panel .text-secondary-foreground { color: oklch(0.95 0 0); }
+.dark .glass-panel .text-muted-foreground    { color: oklch(0.85 0 0); }
+.dark .glass-panel .text-primary-foreground  { color: oklch(1 0 0); }
+
 /* Light mode — slightly more transparent since the map behind is bright */
 html:not(.dark) .glass-panel {
   background: oklch(0.1 0.005 285 / 0.15);
