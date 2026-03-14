@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@ai-sdk/google": "^2.0.0",
+    "@ai-sdk/google": "^2.0.62",
+    "@ai-sdk/provider-utils": "^4.0.19",
     "@ai-sdk/react": "^3.0.118",
     "@radix-ui/react-scroll-area": "^1.2.10",
     "@radix-ui/react-tabs": "^1.1.13",
@@ -19,7 +20,7 @@
     "@streamdown/math": "^1.0.2",
     "@streamdown/mermaid": "^1.0.2",
     "@vis.gl/react-google-maps": "^1.7.1",
-    "ai": "^5.0.154",
+    "ai": "^6.0.116",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",

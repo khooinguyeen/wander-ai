@@ -1,5 +1,5 @@
 import { google } from "@ai-sdk/google";
-import { convertToModelMessages, streamText, tool, type UIMessage } from "ai";
+import { convertToModelMessages, stepCountIs, streamText, tool, type UIMessage } from "ai";
 import { z } from "zod";
 
 import { buildItinerary } from "@/lib/plan";
@@ -51,12 +51,12 @@ export async function POST(req: Request) {
   const result = streamText({
     model: google(model),
     system: SYSTEM_PROMPT,
-    messages: convertToModelMessages(messages),
+    messages: await convertToModelMessages(messages),
     tools: {
       buildRoute: tool({
         description:
           "Build a Melbourne day route once you have the vibe/query, start location, travel mode, and number of stops.",
-        parameters: z.object({
+        inputSchema: z.object({
           query: z
             .string()
             .describe(
@@ -93,7 +93,7 @@ export async function POST(req: Request) {
         }
       })
     },
-    maxSteps: 3
+    stopWhen: stepCountIs(3)
   });
 
   return result.toUIMessageStreamResponse();
