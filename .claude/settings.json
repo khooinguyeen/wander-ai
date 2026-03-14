@@ -17,7 +17,27 @@
       "WebFetch(domain:ui.shadcn.com)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:www.assistant-ui.com)",
-      "WebFetch(domain:elements.ai-sdk.dev)"
+      "WebFetch(domain:elements.ai-sdk.dev)",
+      "Bash(npx ai-elements@latest)",
+      "Bash(npx shadcn@latest add https://elements.ai-sdk.dev/api/registry/message.json --overwrite --yes)",
+      "Bash(npx shadcn@latest add https://elements.ai-sdk.dev/api/registry/conversation.json --overwrite --yes)",
+      "Bash(npx shadcn@latest add https://elements.ai-sdk.dev/api/registry/prompt-input.json --overwrite --yes)",
+      "Bash(node -e \"require\\(''streamdown''\\)\")",
+      "Bash(node -e \"require\\(''use-stick-to-bottom''\\)\")",
+      "Bash(node -e \"require\\(''nanoid''\\)\")",
+      "Bash(node -e \"require\\(''@streamdown/cjk''\\)\")",
+      "Bash(npm ls:*)",
+      "Bash(/tmp/update_env.py:*)",
+      "Bash(python3 /tmp/update_env.py)",
+      "Bash(find /Users/khanhgn/unihack -name *theme* -o -name *dark*)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000)",
+      "Bash(curl -s -X POST http://localhost:3000/api/chat -H \"Content-Type: application/json\" -d '{\"\"\"\"messages\"\"\"\":[{\"\"\"\"role\"\"\"\":\"\"\"\"user\"\"\"\",\"\"\"\"content\"\"\"\":\"\"\"\"I want a lowkey northside day with coffee and a lookout\"\"\"\"}]}' --max-time 30)",
+      "Bash(curl -v -X POST http://localhost:3000/api/chat -H \"Content-Type: application/json\" -d '{\"\"\"\"messages\"\"\"\":[{\"\"\"\"role\"\"\"\":\"\"\"\"user\"\"\"\",\"\"\"\"content\"\"\"\":\"\"\"\"I want a lowkey northside day with coffee and a lookout\"\"\"\"}]}' --max-time 30)",
+      "Bash(node -e \"const ai = require\\(''ai''\\); console.log\\(Object.keys\\(ai\\).filter\\(k => k.includes\\(''stream''\\) || k.includes\\(''Stream''\\)\\).join\\('', ''\\)\\)\")",
+      "Bash(node -e \":*)",
+      "Bash(curl -s -X POST http://localhost:3000/api/chat -H \"Content-Type: application/json\" -d '{\"\"\"\"messages\"\"\"\":[{\"\"\"\"role\"\"\"\":\"\"\"\"user\"\"\"\",\"\"\"\"content\"\"\"\":\"\"\"\"hello\"\"\"\"}]}' --max-time 20)",
+      "Bash(curl -s -X POST http://localhost:3000/api/chat -H \"Content-Type: application/json\" -d '{\"\"\"\"messages\"\"\"\":[:*)",
+      "WebFetch(domain:ai-sdk.dev)"
     ]
   }
 }

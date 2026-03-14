@@ -24,6 +24,7 @@ type RouteMapProps = {
   onSelectStop: (id: string) => void;
   startLocation: string;
   travelMode: TravelMode;
+  colorScheme?: "DARK" | "LIGHT";
 };
 
 function travelModeToGoogle(mode: TravelMode): google.maps.TravelMode {
@@ -131,7 +132,8 @@ function GoogleMapInner({
   previewSpots,
   activeStopId,
   onSelectStop,
-  travelMode
+  travelMode,
+  colorScheme = "DARK"
 }: RouteMapProps) {
   const hasStops = stops.length > 0;
 
@@ -140,7 +142,7 @@ function GoogleMapInner({
       defaultCenter={MELBOURNE_CENTER}
       defaultZoom={13}
       mapId={DARK_MAP_ID}
-      colorScheme="DARK"
+      colorScheme={colorScheme}
       gestureHandling="greedy"
       disableDefaultUI={false}
       zoomControl={true}

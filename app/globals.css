@@ -3,42 +3,79 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ── Light theme (default) ───────────────────────────────── */
 @theme inline {
-  --color-background: oklch(0.14 0.005 285);
-  --color-foreground: oklch(0.95 0.01 260);
-  --color-card: oklch(0.17 0.005 285);
-  --color-card-foreground: oklch(0.95 0.01 260);
-  --color-popover: oklch(0.17 0.005 285);
-  --color-popover-foreground: oklch(0.95 0.01 260);
-  --color-primary: oklch(0.62 0.15 255);
+  --color-background: oklch(0.98 0.002 260);
+  --color-foreground: oklch(0.15 0.01 260);
+  --color-card: oklch(1 0 0);
+  --color-card-foreground: oklch(0.15 0.01 260);
+  --color-popover: oklch(1 0 0);
+  --color-popover-foreground: oklch(0.15 0.01 260);
+  --color-primary: oklch(0.55 0.18 255);
   --color-primary-foreground: oklch(0.98 0 0);
-  --color-secondary: oklch(0.22 0.01 285);
-  --color-secondary-foreground: oklch(0.9 0.01 260);
-  --color-muted: oklch(0.22 0.01 285);
-  --color-muted-foreground: oklch(0.65 0.015 260);
-  --color-accent: oklch(0.25 0.015 285);
-  --color-accent-foreground: oklch(0.95 0.01 260);
+  --color-secondary: oklch(0.94 0.005 260);
+  --color-secondary-foreground: oklch(0.2 0.01 260);
+  --color-muted: oklch(0.94 0.005 260);
+  --color-muted-foreground: oklch(0.45 0.015 260);
+  --color-accent: oklch(0.94 0.005 260);
+  --color-accent-foreground: oklch(0.15 0.01 260);
   --color-destructive: oklch(0.55 0.2 25);
   --color-destructive-foreground: oklch(0.98 0 0);
-  --color-border: oklch(0.25 0.005 285);
-  --color-input: oklch(0.25 0.005 285);
-  --color-ring: oklch(0.62 0.15 255);
-  --color-chart-1: oklch(0.62 0.15 255);
-  --color-chart-2: oklch(0.7 0.18 160);
-  --color-chart-3: oklch(0.75 0.15 85);
-  --color-chart-4: oklch(0.65 0.2 330);
-  --color-chart-5: oklch(0.7 0.2 25);
-  --color-sidebar: oklch(0.14 0.005 285);
-  --color-sidebar-foreground: oklch(0.95 0.01 260);
-  --color-sidebar-primary: oklch(0.62 0.15 255);
+  --color-border: oklch(0.88 0.005 260);
+  --color-input: oklch(0.88 0.005 260);
+  --color-ring: oklch(0.55 0.18 255);
+  --color-chart-1: oklch(0.55 0.18 255);
+  --color-chart-2: oklch(0.6 0.18 160);
+  --color-chart-3: oklch(0.65 0.15 85);
+  --color-chart-4: oklch(0.55 0.2 330);
+  --color-chart-5: oklch(0.6 0.2 25);
+  --color-sidebar: oklch(0.97 0.002 260);
+  --color-sidebar-foreground: oklch(0.15 0.01 260);
+  --color-sidebar-primary: oklch(0.55 0.18 255);
   --color-sidebar-primary-foreground: oklch(0.98 0 0);
-  --color-sidebar-accent: oklch(0.25 0.015 285);
-  --color-sidebar-accent-foreground: oklch(0.95 0.01 260);
-  --color-sidebar-border: oklch(0.25 0.005 285);
-  --color-sidebar-ring: oklch(0.62 0.15 255);
+  --color-sidebar-accent: oklch(0.94 0.005 260);
+  --color-sidebar-accent-foreground: oklch(0.15 0.01 260);
+  --color-sidebar-border: oklch(0.88 0.005 260);
+  --color-sidebar-ring: oklch(0.55 0.18 255);
   --radius: 0.625rem;
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
+}
+
+/* ── Dark theme — Linear / Vercel inspired ───────────────── */
+.dark {
+  --color-background: oklch(0.13 0.004 285);
+  --color-foreground: oklch(0.985 0 0);          /* near-white */
+  --color-card: oklch(0.16 0.004 285);
+  --color-card-foreground: oklch(0.985 0 0);
+  --color-popover: oklch(0.16 0.004 285);
+  --color-popover-foreground: oklch(0.985 0 0);
+  --color-primary: oklch(0.68 0.16 252);          /* brighter blue */
+  --color-primary-foreground: oklch(0.985 0 0);
+  --color-secondary: oklch(0.21 0.006 285);
+  --color-secondary-foreground: oklch(0.92 0.005 260);
+  --color-muted: oklch(0.21 0.006 285);
+  --color-muted-foreground: oklch(0.72 0.01 260); /* brighter than before */
+  --color-accent: oklch(0.24 0.008 285);
+  --color-accent-foreground: oklch(0.985 0 0);
+  --color-destructive: oklch(0.6 0.2 25);
+  --color-destructive-foreground: oklch(0.985 0 0);
+  --color-border: oklch(0.28 0.006 285);          /* slightly brighter borders */
+  --color-input: oklch(0.28 0.006 285);
+  --color-ring: oklch(0.68 0.16 252);
+  --color-chart-1: oklch(0.68 0.16 252);
+  --color-chart-2: oklch(0.72 0.18 160);
+  --color-chart-3: oklch(0.76 0.15 85);
+  --color-chart-4: oklch(0.68 0.2 330);
+  --color-chart-5: oklch(0.72 0.2 25);
+  --color-sidebar: oklch(0.13 0.004 285);
+  --color-sidebar-foreground: oklch(0.985 0 0);
+  --color-sidebar-primary: oklch(0.68 0.16 252);
+  --color-sidebar-primary-foreground: oklch(0.985 0 0);
+  --color-sidebar-accent: oklch(0.24 0.008 285);
+  --color-sidebar-accent-foreground: oklch(0.985 0 0);
+  --color-sidebar-border: oklch(0.28 0.006 285);
+  --color-sidebar-ring: oklch(0.68 0.16 252);
 }
 
 html, body {
@@ -83,14 +120,47 @@ body {
   display: flex;
   flex-direction: column;
   width: var(--panel-w);
-  border-radius: 1.25rem;
-  border: 1px solid oklch(0.3 0.005 285 / 0.6);
-  background: oklch(0.13 0.005 285 / 0.72);
+  border-radius: 1rem;
+  overflow: hidden;
+  transition: background 0.3s, border-color 0.3s, box-shadow 0.3s;
+}
+
+/* Glass panel — dark translucent glass in both themes.
+   Override ALL color vars so text is always bright white on dark glass. */
+.glass-panel {
   backdrop-filter: blur(40px) saturate(180%);
   -webkit-backdrop-filter: blur(40px) saturate(180%);
-  box-shadow: 0 24px 80px oklch(0 0 0 / 0.5);
-  overflow: hidden;
+  background: oklch(0.1 0.005 285 / 0.65);
+  border: 1px solid oklch(1 0 0 / 0.1);
+  box-shadow: 0 24px 80px oklch(0 0 0 / 0.4);
+
+  /* White-on-dark palette — applies in BOTH light and dark themes */
+  --color-foreground: oklch(1 0 0);               /* pure white */
+  --color-card: oklch(1 0 0 / 0.06);
+  --color-card-foreground: oklch(1 0 0);
+  --color-popover: oklch(0.16 0.004 285);
+  --color-popover-foreground: oklch(1 0 0);
+  --color-primary: oklch(0.78 0.12 252);           /* bright blue */
+  --color-primary-foreground: oklch(1 0 0);
+  --color-secondary: oklch(1 0 0 / 0.08);
+  --color-secondary-foreground: oklch(0.95 0 0);
+  --color-muted: oklch(1 0 0 / 0.06);
+  --color-muted-foreground: oklch(0.85 0 0);       /* bright grey */
+  --color-accent: oklch(1 0 0 / 0.08);
+  --color-accent-foreground: oklch(1 0 0);
+  --color-border: oklch(1 0 0 / 0.14);
+  --color-input: oklch(1 0 0 / 0.14);
+  --color-ring: oklch(0.78 0.12 252);
 }
+
+/* Light mode — slightly more transparent since the map behind is bright */
+html:not(.dark) .glass-panel {
+  background: oklch(0.1 0.005 285 / 0.15);
+  box-shadow:
+    0 1px 3px oklch(0 0 0 / 0.06),
+    0 12px 40px oklch(0 0 0 / 0.15);
+}
+
 .glass-panel--left { left: var(--panel-gap); }
 .glass-panel--right { right: var(--panel-gap); }
 
@@ -121,6 +191,13 @@ body {
 .fallback-map {
   @apply relative w-full h-full overflow-hidden;
   background:
+    radial-gradient(circle at 30% 40%, oklch(0.55 0.18 255 / 0.06), transparent 50%),
+    radial-gradient(circle at 70% 60%, oklch(0.6 0.18 160 / 0.05), transparent 40%),
+    linear-gradient(180deg, oklch(0.96 0.002 260), oklch(0.93 0.002 260));
+}
+
+.dark .fallback-map {
+  background:
     radial-gradient(circle at 30% 40%, oklch(0.62 0.15 255 / 0.06), transparent 50%),
     radial-gradient(circle at 70% 60%, oklch(0.7 0.18 160 / 0.05), transparent 40%),
     linear-gradient(180deg, oklch(0.14 0.005 285), oklch(0.11 0.005 285));
@@ -128,9 +205,13 @@ body {
 
 .fallback-map__notice {
   @apply absolute top-4 left-1/2 -translate-x-1/2 z-5 px-3.5 py-2 rounded-xl text-xs text-muted-foreground whitespace-nowrap;
-  background: oklch(0.13 0.005 285 / 0.85);
+  background: oklch(0.97 0.002 260 / 0.85);
   backdrop-filter: blur(12px);
-  border: 1px solid oklch(0.3 0.005 285 / 0.6);
+  border: 1px solid oklch(0.88 0.005 260 / 0.6);
+}
+.dark .fallback-map__notice {
+  background: oklch(0.13 0.005 285 / 0.85);
+  border-color: oklch(0.3 0.005 285 / 0.6);
 }
 .fallback-map__notice code { @apply font-mono text-primary; }
 
@@ -174,6 +255,41 @@ body {
 @media (max-width: 900px) {
   .glass-panel { --panel-w: min(320px, 44vw); }
 }
+
+/* ── Chat message animations ──────────────────────────────── */
+@keyframes chat-fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes chat-suggestion-in {
+  from { opacity: 0; transform: scale(0.92); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes chat-dot-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30%           { transform: translateY(-4px); opacity: 1; }
+}
+
+.chat-msg {
+  animation: chat-fade-in 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.chat-suggestion {
+  animation: chat-suggestion-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.chat-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: chat-dot-bounce 1.2s ease-in-out infinite;
+}
+.chat-dot:nth-child(2) { animation-delay: 0.15s; }
+.chat-dot:nth-child(3) { animation-delay: 0.3s; }
 
 @media (max-width: 700px) {
   .glass-panel {
