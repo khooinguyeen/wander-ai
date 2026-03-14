@@ -1,0 +1,9 @@
+node_modules
+.next
+.DS_Store
+.env
+.env.local
+npm-debug.log*
+data/
+__pycache__/
+tsconfig.tsbuildinfo
