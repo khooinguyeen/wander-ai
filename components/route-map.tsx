@@ -382,10 +382,8 @@ function ClusteredVenueMarkers({
 }) {
   const map = useMap();
   const markerLib = useMapsLibrary("marker");
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const markersRef = useRef<any[]>([]);
   const clustererRef = useRef<MarkerClusterer | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const venueIdMapRef = useRef<globalThis.Map<any, string>>(new globalThis.Map());
 
   // Create / update markers & clusterer when venues change
