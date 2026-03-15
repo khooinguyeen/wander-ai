@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   APIProvider,
   Map,
@@ -12,6 +12,8 @@ import {
 import type { PlannedStop, Spot, TravelMode, Venue } from "@/lib/types";
 
 const MELBOURNE_CENTER = { lat: -37.8136, lng: 144.9631 };
+// 483 Swanston St, Melbourne CBD
+const CURRENT_LOCATION = { lat: -37.8103, lng: 144.9633 };
 const API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
 
 const DARK_MAP_ID = "DEMO_MAP_ID";
@@ -106,6 +108,34 @@ function DirectionsRenderer({
   return null;
 }
 
+function ZoomToSelected({ destination }: { destination: { lat: number; lng: number } | null }) {
+  const map = useMap();
+  const prevDest = useRef<{ lat: number; lng: number } | null>(null);
+
+  useEffect(() => {
+    if (!map || !destination) {
+      prevDest.current = null;
+      return;
+    }
+    // Only zoom when destination changes
+    if (
+      prevDest.current &&
+      prevDest.current.lat === destination.lat &&
+      prevDest.current.lng === destination.lng
+    ) return;
+
+    prevDest.current = destination;
+
+    // Center between current location and destination, zoom in
+    const bounds = new google.maps.LatLngBounds();
+    bounds.extend(CURRENT_LOCATION);
+    bounds.extend(destination);
+    map.fitBounds(bounds, { top: 80, bottom: 80, left: 60, right: 60 });
+  }, [map, destination]);
+
+  return null;
+}
+
 function FitBounds({ stops, previewSpots, venues }: { stops: PlannedStop[]; previewSpots: Spot[]; venues: Venue[] }) {
   const map = useMap();
 
@@ -149,8 +179,129 @@ const VENUE_CATEGORY_COLORS: Record<string, string> = {
   other: "#6b7280",
 };
 
-import { UtensilsCrossed, Coffee, Wine, MapPin } from "lucide-react";
+import { UtensilsCrossed, Coffee, Wine, MapPin, Navigation, X } from "lucide-react";
 import type { ReactNode } from "react";
+
+type ModeInfo = { distance: string; duration: string };
+type AllRouteInfo = {
+  walking: ModeInfo | null;
+  driving: ModeInfo | null;
+  transit: ModeInfo | null;
+};
+
+function DirectionsToSelected({
+  destination,
+  active,
+  travelMode,
+  onRouteInfo
+}: {
+  destination: { lat: number; lng: number } | null;
+  active: boolean;
+  travelMode: TravelMode;
+  onRouteInfo: (info: AllRouteInfo | null) => void;
+}) {
+  const map = useMap();
+  const routesLib = useMapsLibrary("routes");
+  const rendererRef = useRef<google.maps.DirectionsRenderer | null>(null);
+  const glowRendererRef = useRef<google.maps.DirectionsRenderer | null>(null);
+  const pulseRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (!map || !routesLib || !destination || !active) {
+      if (rendererRef.current) { rendererRef.current.setMap(null); rendererRef.current = null; }
+      if (glowRendererRef.current) { glowRendererRef.current.setMap(null); glowRendererRef.current = null; }
+      if (pulseRef.current) { clearInterval(pulseRef.current); pulseRef.current = null; }
+      if (!active) onRouteInfo(null);
+      return;
+    }
+
+    const service = new routesLib.DirectionsService();
+
+    // Glow layer — wider, semi-transparent, pulsing
+    const glowPolylineOpts: google.maps.PolylineOptions = {
+      strokeColor: "#facc15",
+      strokeWeight: 12,
+      strokeOpacity: 0.25
+    };
+    const glowRenderer = new routesLib.DirectionsRenderer({
+      map,
+      suppressMarkers: true,
+      polylineOptions: glowPolylineOpts
+    });
+    glowRendererRef.current = glowRenderer;
+
+    // Main route layer
+    const renderer = new routesLib.DirectionsRenderer({
+      map,
+      suppressMarkers: true,
+      polylineOptions: {
+        strokeColor: "#facc15",
+        strokeWeight: 4,
+        strokeOpacity: 0.95
+      }
+    });
+    rendererRef.current = renderer;
+
+    const origin = new google.maps.LatLng(CURRENT_LOCATION.lat, CURRENT_LOCATION.lng);
+    const dest = new google.maps.LatLng(destination.lat, destination.lng);
+
+    // Render the active travel mode route on the map
+    service.route(
+      { origin, destination: dest, travelMode: travelModeToGoogle(travelMode) },
+      (result, status) => {
+        if (status === google.maps.DirectionsStatus.OK && result) {
+          renderer.setDirections(result);
+          glowRenderer.setDirections(result);
+
+          // Pulse the glow opacity
+          let opacity = 0.25;
+          let rising = true;
+          pulseRef.current = setInterval(() => {
+            opacity += rising ? 0.02 : -0.02;
+            if (opacity >= 0.45) rising = false;
+            if (opacity <= 0.15) rising = true;
+            glowRenderer.setOptions({ polylineOptions: { ...glowPolylineOpts, strokeOpacity: opacity } });
+          }, 60);
+        }
+      }
+    );
+
+    // Fetch all three modes in parallel for the info panel
+    const modes: TravelMode[] = ["walking", "driving", "transit"];
+    const results: AllRouteInfo = { walking: null, driving: null, transit: null };
+    let completed = 0;
+
+    for (const mode of modes) {
+      service.route(
+        { origin, destination: dest, travelMode: travelModeToGoogle(mode) },
+        (result, status) => {
+          if (status === google.maps.DirectionsStatus.OK && result) {
+            const leg = result.routes[0]?.legs[0];
+            if (leg) {
+              results[mode] = {
+                distance: leg.distance?.text ?? "",
+                duration: leg.duration?.text ?? "",
+              };
+            }
+          }
+          completed++;
+          if (completed === modes.length) {
+            onRouteInfo({ ...results });
+          }
+        }
+      );
+    }
+
+    return () => {
+      renderer.setMap(null);
+      glowRenderer.setMap(null);
+      if (pulseRef.current) { clearInterval(pulseRef.current); pulseRef.current = null; }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, routesLib, destination, active, travelMode]);
+
+  return null;
+}
 
 const VENUE_CATEGORY_ICON: Record<string, ReactNode> = {
   restaurant: <UtensilsCrossed size={14} strokeWidth={2.5} color="#fff" />,
@@ -175,8 +326,63 @@ function GoogleMapInner({
 }: RouteMapProps) {
   const hasStops = stops.length > 0;
   const hasVenues = venues.length > 0;
+  const [showDirections, setShowDirections] = useState(false);
+  const [routeInfo, setRouteInfo] = useState<AllRouteInfo | null>(null);
+
+  // Selected venue/stop name
+  const selectedEntity = useMemo(() => {
+    if (activeStopId && hasStops) {
+      const stop = stops.find((s) => s.spot.id === activeStopId);
+      if (stop) return { name: stop.spot.name };
+    }
+    if (selectedVenueId && hasVenues) {
+      const venue = venues.find((v) => v.id === selectedVenueId);
+      if (venue) return { name: venue.name };
+    }
+    return null;
+  }, [activeStopId, selectedVenueId, stops, venues, hasStops, hasVenues]);
+
+  // Compute destination for directions from current location
+  const selectedDestination = useMemo(() => {
+    if (activeStopId && hasStops) {
+      const stop = stops.find((s) => s.spot.id === activeStopId);
+      if (stop) return { lat: stop.spot.coordinates.lat, lng: stop.spot.coordinates.lng };
+    }
+    if (selectedVenueId && hasVenues) {
+      const venue = venues.find((v) => v.id === selectedVenueId);
+      if (venue) return { lat: venue.lat, lng: venue.lng };
+    }
+    return null;
+  }, [activeStopId, selectedVenueId, stops, venues, hasStops, hasVenues]);
+
+  // Reset directions when selection changes
+  const prevDestRef = useRef(selectedDestination);
+  useEffect(() => {
+    if (
+      prevDestRef.current?.lat !== selectedDestination?.lat ||
+      prevDestRef.current?.lng !== selectedDestination?.lng
+    ) {
+      setShowDirections(false);
+      setRouteInfo(null);
+    }
+    prevDestRef.current = selectedDestination;
+  }, [selectedDestination]);
+
+  const handleRouteInfo = useCallback((info: AllRouteInfo | null) => {
+    setRouteInfo(info);
+  }, []);
+
+  const handleGetDirections = useCallback(() => {
+    setShowDirections(true);
+  }, []);
+
+  const handleCloseDirections = useCallback(() => {
+    setShowDirections(false);
+    setRouteInfo(null);
+  }, []);
 
   return (
+    <>
     <Map
       defaultCenter={MELBOURNE_CENTER}
       defaultZoom={13}
@@ -192,6 +398,20 @@ function GoogleMapInner({
     >
       <FitBounds stops={stops} previewSpots={previewSpots} venues={venues} />
 
+      {/* Current location marker */}
+      <AdvancedMarker position={CURRENT_LOCATION} zIndex={200}>
+        <div className="current-location-marker" />
+      </AdvancedMarker>
+
+      {/* Directions from current location to selected marker — only when requested */}
+      <DirectionsToSelected
+        destination={selectedDestination}
+        active={showDirections}
+        travelMode={travelMode}
+        onRouteInfo={handleRouteInfo}
+      />
+      {showDirections && <ZoomToSelected destination={selectedDestination} />}
+
       {hasStops && <DirectionsRenderer stops={stops} travelMode={travelMode} />}
 
       {hasStops
@@ -204,11 +424,15 @@ function GoogleMapInner({
               }}
               onClick={() => onSelectStop(stop.spot.id)}
               zIndex={activeStopId === stop.spot.id ? 100 : 10}
+              style={{ overflow: "visible" }}
             >
               <div
-                className={`gmap-marker ${activeStopId === stop.spot.id ? "gmap-marker--active" : ""}`}
+                className={`pill-marker pill-marker--stop ${activeStopId === stop.spot.id ? "pill-marker--expanded" : ""}`}
               >
-                {String(i + 1).padStart(2, "0")}
+                <span className="pill-marker__num">{i + 1}</span>
+                {activeStopId === stop.spot.id && (
+                  <span className="pill-marker__label">{stop.spot.name}</span>
+                )}
               </div>
             </AdvancedMarker>
           ))
@@ -224,24 +448,16 @@ function GoogleMapInner({
                   title={venue.name}
                   onClick={() => onSelectVenue(venue.id)}
                   zIndex={isSelected ? 100 : 10}
+                  style={{ overflow: "visible" }}
                 >
-                  {isSelected ? (
-                    <div className="venue-marker venue-marker--expanded" style={{ borderColor: color }}>
-                      <div className="venue-marker__dot" style={{ background: color }}>
-                        {icon}
-                      </div>
-                      <div className="venue-marker__info">
-                        <span className="venue-marker__name">{venue.name}</span>
-                        <span className="venue-marker__sub">{venue.suburb !== "unknown" ? venue.suburb : venue.city} · {venue.uiCategory}</span>
-                      </div>
-                      <div className="venue-marker__arrow" style={{ borderTopColor: color }} />
-                    </div>
-                  ) : (
-                    <div className="venue-marker venue-marker--dot" style={{ background: color }}>
+                  <div className={`pill-marker pill-marker--venue ${isSelected ? "pill-marker--expanded" : ""}`}>
+                    <span className="pill-marker__icon" style={{ background: color }}>
                       {icon}
-                      <div className="venue-marker__arrow-sm" style={{ borderTopColor: color }} />
-                    </div>
-                  )}
+                    </span>
+                    {isSelected && (
+                      <span className="pill-marker__label">{venue.name}</span>
+                    )}
+                  </div>
                 </AdvancedMarker>
               );
             })
@@ -250,10 +466,56 @@ function GoogleMapInner({
                 key={spot.id}
                 position={{ lat: spot.coordinates.lat, lng: spot.coordinates.lng }}
               >
-                <div className="gmap-marker gmap-marker--preview" />
+                <div className="pill-marker pill-marker--preview" />
               </AdvancedMarker>
             ))}
     </Map>
+
+    {/* Bottom info panel — shows when a location is selected */}
+    {selectedDestination && selectedEntity && (
+      <div className="directions-panel">
+        <div className="directions-panel__header">
+          <span className="directions-panel__name">{selectedEntity.name}</span>
+          {showDirections && (
+            <button type="button" className="directions-panel__close" onClick={handleCloseDirections}>
+              <X size={14} />
+            </button>
+          )}
+        </div>
+
+        {showDirections && routeInfo ? (
+          <div className="directions-panel__modes">
+            {routeInfo.walking && (
+              <div className="directions-panel__mode-card">
+                <span className="directions-panel__mode-icon">🚶</span>
+                <span className="directions-panel__mode-time">{routeInfo.walking.duration}</span>
+                <span className="directions-panel__mode-dist">{routeInfo.walking.distance}</span>
+              </div>
+            )}
+            {routeInfo.driving && (
+              <div className="directions-panel__mode-card">
+                <span className="directions-panel__mode-icon">🚗</span>
+                <span className="directions-panel__mode-time">{routeInfo.driving.duration}</span>
+                <span className="directions-panel__mode-dist">{routeInfo.driving.distance}</span>
+              </div>
+            )}
+            {routeInfo.transit && (
+              <div className="directions-panel__mode-card">
+                <span className="directions-panel__mode-icon">🚊</span>
+                <span className="directions-panel__mode-time">{routeInfo.transit.duration}</span>
+                <span className="directions-panel__mode-dist">{routeInfo.transit.distance}</span>
+              </div>
+            )}
+          </div>
+        ) : (
+          <button type="button" className="directions-panel__btn" onClick={handleGetDirections}>
+            <Navigation size={13} />
+            Get Directions
+          </button>
+        )}
+      </div>
+    )}
+    </>
   );
 }
 
@@ -377,8 +639,10 @@ export function RouteMap(props: RouteMapProps) {
   }
 
   return (
-    <APIProvider apiKey={API_KEY}>
-      <GoogleMapInner {...props} />
-    </APIProvider>
+    <div style={{ position: "relative", width: "100%", height: "100%" }}>
+      <APIProvider apiKey={API_KEY}>
+        <GoogleMapInner {...props} />
+      </APIProvider>
+    </div>
   );
 }

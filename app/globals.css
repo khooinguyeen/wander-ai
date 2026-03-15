@@ -160,7 +160,7 @@ body {
 /* Dark theme: force white text + stronger palette for contrast */
 .dark .glass-panel {
   color: oklch(1 0 0);
-  background: oklch(0.1 0.005 285 / 0.92);    /* more opaque = darker panel */
+  background: oklch(0.18 0.005 285 / 0.85);
   --color-secondary: oklch(0.28 0.006 285);     /* dark grey badge background */
 }
 
@@ -346,130 +346,297 @@ html:not(.dark) .floating-pill {
 }
 
 /* ── Google Maps markers (rendered inside AdvancedMarker) ─── */
-.gmap-marker {
-  @apply grid place-items-center font-mono text-xs font-bold text-white select-none cursor-pointer;
-  width: 32px; height: 32px;
-  border-radius: 50% 50% 50% 6px;
-  transform: rotate(-45deg);
-  background: linear-gradient(145deg, oklch(0.62 0.15 255), oklch(0.7 0.14 255));
-  box-shadow: 0 4px 12px oklch(0 0 0 / 0.4);
-}
-.gmap-marker > * { transform: rotate(45deg); }
-.gmap-marker--active {
-  background: linear-gradient(145deg, oklch(0.2 0.01 240), oklch(0.32 0.01 240));
-  width: 38px; height: 38px;
-  box-shadow: 0 6px 20px oklch(0 0 0 / 0.6);
-}
-.gmap-marker--preview {
-  width: 14px; height: 14px;
+/* ── pill markers ─────────────────────────────────────────── */
+.pill-marker {
+  display: flex;
+  align-items: center;
   border-radius: 50%;
-  transform: none;
-  background: oklch(0.7 0.18 160);
-  box-shadow: 0 0 0 4px oklch(0.7 0.18 160 / 0.2), 0 4px 12px oklch(0 0 0 / 0.3);
-}
-/* ── custom venue markers ─────────────────────────────────── */
-.venue-marker {
-  position: relative;
+  background: oklch(1 0 0);
+  box-shadow:
+    0 2px 8px oklch(0 0 0 / 0.18),
+    0 0 0 1px oklch(0 0 0 / 0.06);
   cursor: pointer;
   transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-.venue-marker:hover { transform: translateY(-3px) scale(1.08); }
-
-/* Small dot marker (default / unselected) */
-.venue-marker--dot {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  box-shadow:
-    0 2px 8px oklch(0 0 0 / 0.3),
-    0 0 0 3px oklch(1 0 0 / 0.15);
-}
-.venue-marker--dot svg {
-  width: 16px;
-  height: 16px;
-}
-.venue-marker--dot .venue-marker__arrow-sm {
-  position: absolute;
-  bottom: -6px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 0; height: 0;
-  border-left: 5px solid transparent;
-  border-right: 5px solid transparent;
-  border-top: 6px solid;
-}
-
-/* Expanded marker (selected) */
-.venue-marker--expanded {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px 6px 6px;
-  border-radius: 24px;
-  background: oklch(0.13 0.005 285 / 0.92);
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
-  border: 2px solid;
-  box-shadow:
-    0 8px 32px oklch(0 0 0 / 0.4),
-    0 0 0 1px oklch(0 0 0 / 0.1);
   white-space: nowrap;
-  animation: marker-pop 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.pill-marker:hover {
+  transform: scale(1.12);
+  box-shadow:
+    0 4px 16px oklch(0 0 0 / 0.22),
+    0 0 0 1px oklch(0 0 0 / 0.08);
 }
 
-.venue-marker__dot {
+/* Dark theme — collapsed */
+.dark .pill-marker {
+  background: oklch(0.22 0.01 260);
+  box-shadow:
+    0 2px 8px oklch(0 0 0 / 0.4),
+    0 0 0 1px oklch(1 0 0 / 0.08);
+}
+.dark .pill-marker:hover {
+  box-shadow:
+    0 4px 16px oklch(0 0 0 / 0.5),
+    0 0 0 1px oklch(1 0 0 / 0.12);
+}
+
+/* Expanded state — pill with label */
+.pill-marker--expanded {
+  border-radius: 24px;
+  padding: 5px 24px 5px 5px;
+  gap: 10px;
+  background: oklch(0.15 0.01 260);
+  box-shadow:
+    0 4px 20px oklch(0 0 0 / 0.35),
+    0 0 0 2px oklch(0.5 0.15 255 / 0.4);
+  animation: marker-pop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Light theme — expanded */
+html:not(.dark) .pill-marker--expanded {
+  background: oklch(1 0 0);
+  box-shadow:
+    0 4px 20px oklch(0 0 0 / 0.2),
+    0 0 0 2px oklch(0.5 0.15 255 / 0.3);
+}
+
+/* Stop number badge */
+.pill-marker__num {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: oklch(0.55 0.15 255);
+  color: oklch(1 0 0);
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.pill-marker--expanded .pill-marker__num {
+  background: oklch(0.65 0.18 255);
+}
+
+/* Venue category icon badge */
+.pill-marker__icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   flex-shrink: 0;
 }
-.venue-marker__dot svg {
-  width: 14px;
-  height: 14px;
+.pill-marker__icon svg {
+  width: 13px;
+  height: 13px;
 }
 
-.venue-marker__info {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-}
-.venue-marker__name {
-  font-size: 12px;
-  font-weight: 700;
+/* Label text — only visible in expanded state */
+.pill-marker__label {
+  font-size: 13px;
+  font-weight: 600;
   color: oklch(1 0 0);
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
   line-height: 1.2;
+  padding-right: 10px;
 }
-.venue-marker__sub {
-  font-size: 10px;
-  color: oklch(0.75 0 0);
-  text-transform: capitalize;
-  line-height: 1.2;
+html:not(.dark) .pill-marker__label {
+  color: oklch(0.2 0 0);
 }
 
-.venue-marker--expanded .venue-marker__arrow {
+/* Preview variant — small neutral dot */
+.pill-marker--preview {
+  width: 12px;
+  height: 12px;
+  background: oklch(0.75 0 0 / 0.6);
+  box-shadow:
+    0 1px 4px oklch(0 0 0 / 0.15),
+    0 0 0 2px oklch(1 0 0 / 0.3);
+}
+.dark .pill-marker--preview {
+  background: oklch(0.6 0 0 / 0.5);
+  box-shadow:
+    0 1px 4px oklch(0 0 0 / 0.3),
+    0 0 0 2px oklch(1 0 0 / 0.1);
+}
+
+/* Venue collapsed — just the icon circle */
+.pill-marker--venue {
+  padding: 0;
+}
+
+/* Current location — Google Maps blue dot style */
+.current-location-marker {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #4285F4;
+  border: 3px solid #fff;
+  box-shadow:
+    0 0 0 2px #4285F4,
+    0 2px 8px oklch(0 0 0 / 0.4);
+  z-index: 300;
+}
+.current-location-marker::after {
+  content: "";
   position: absolute;
-  bottom: -7px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 0; height: 0;
-  border-left: 7px solid transparent;
-  border-right: 7px solid transparent;
-  border-top: 8px solid;
+  inset: -8px;
+  border-radius: 50%;
+  background: #4285F4;
+  opacity: 0.2;
+  animation: pulse-ring 2s ease-out infinite;
+}
+
+@keyframes pulse-ring {
+  0%   { transform: scale(1); opacity: 0.2; }
+  70%  { transform: scale(2.2); opacity: 0; }
+  100% { transform: scale(1); opacity: 0; }
 }
 
 @keyframes marker-pop {
-  from { opacity: 0; transform: scale(0.7) translateY(8px); }
+  from { opacity: 0; transform: scale(0.7) translateY(6px); }
   to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* ── directions panel ──────────────────────────────────── */
+.directions-panel {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  min-width: 220px;
+  border-radius: 1rem;
+  animation: slide-up 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+}
+
+/* Light mode */
+html:not(.dark) .directions-panel {
+  background: oklch(1 0 0 / 0.75);
+  border: 1px solid oklch(0 0 0 / 0.08);
+  box-shadow:
+    0 1px 3px oklch(0 0 0 / 0.06),
+    0 12px 40px oklch(0 0 0 / 0.15);
+  --dp-fg: oklch(0.15 0 0);
+  --dp-muted: oklch(0.45 0 0);
+  --dp-card: oklch(0 0 0 / 0.05);
+  --dp-close: oklch(0 0 0 / 0.06);
+  --dp-close-hover: oklch(0 0 0 / 0.1);
+}
+
+/* Dark mode */
+.dark .directions-panel {
+  background: oklch(0.18 0.005 285 / 0.85);
+  border: 1px solid oklch(1 0 0 / 0.12);
+  box-shadow: 0 8px 32px oklch(0 0 0 / 0.3);
+  --dp-fg: oklch(1 0 0);
+  --dp-muted: oklch(0.7 0 0);
+  --dp-card: oklch(1 0 0 / 0.08);
+  --dp-close: oklch(1 0 0 / 0.1);
+  --dp-close-hover: oklch(1 0 0 / 0.18);
+}
+
+.directions-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  justify-content: center;
+}
+
+.directions-panel__name {
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--dp-fg);
+}
+
+.directions-panel__close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s;
+  flex-shrink: 0;
+  background: var(--dp-close);
+  color: var(--dp-muted);
+}
+.directions-panel__close:hover {
+  background: var(--dp-close-hover);
+  color: var(--dp-fg);
+}
+
+.directions-panel__modes {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.directions-panel__mode-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 14px;
+  border-radius: 12px;
+  background: var(--dp-card);
+}
+
+.directions-panel__mode-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.directions-panel__mode-time {
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--dp-fg);
+}
+
+.directions-panel__mode-dist {
+  font-size: 10px;
+  white-space: nowrap;
+  color: var(--dp-muted);
+}
+
+.directions-panel__btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  border-radius: 20px;
+  border: none;
+  background: #facc15;
+  color: #1a1a1a;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.directions-panel__btn:hover {
+  background: #eab308;
+  transform: scale(1.04);
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateX(-50%) translateY(12px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
 /* ── venue detail card ──────────────────────────────────── */
