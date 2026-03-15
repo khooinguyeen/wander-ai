@@ -52,8 +52,10 @@ import { cn } from "@/lib/utils";
 import { usePlaceDetails } from "@/lib/use-place-details";
 import { usePlacePhoto } from "@/lib/use-place-photo";
 import type {
+  ChatMode,
   ItineraryResponse,
   PlannedStop,
+  RecommendationsResponse,
   TravelMode,
   Venue,
   VenueCategory
@@ -89,12 +91,20 @@ const CATEGORIES: { value: CategoryFilter; label: string; icon: React.ReactNode 
   { value: "attraction", label: "Attractions", icon: <MapPin className="size-3" /> },
 ];
 
-const SUGGESTIONS = [
-  "lowkey northside day with coffee and a lookout",
-  "southside brunch then sunset for a date",
-  "CBD fashion and food route for a visitor",
-  "lunch and fashion stores around Fitzroy"
-];
+const SUGGESTIONS: Record<ChatMode, string[]> = {
+  "route-planning": [
+    "lowkey northside day with coffee and a lookout",
+    "southside brunch then sunset for a date",
+    "CBD fashion and food route for a visitor",
+    "lunch and fashion stores around Fitzroy"
+  ],
+  recommendations: [
+    "Recommend hidden cafes near Fitzroy",
+    "Best rooftop bars in CBD for date night",
+    "Top budget-friendly brunch spots in Carlton",
+    "Cozy places in Brunswick with chill vibe"
+  ]
+};
 
 const PLACEHOLDERS = [
   "Plan me a date night...",
@@ -109,7 +119,18 @@ const PLACEHOLDERS = [
   "Build me the perfect Saturday...",
 ];
 
-const WELCOME_PROMPTS = [
+const RECOMMENDATION_PLACEHOLDERS = [
+  "What vibe are you after?",
+  "Which suburb should I focus on?",
+  "Any budget range in mind?",
+  "Want hidden gems or popular spots?",
+  "Tell me area + mood and I'll narrow it down...",
+];
+
+const ROUTE_SWITCH_CONFIRM_PATTERN = /(switch|move).*(route planning)|route planning mode|confirm.*switch/i;
+const AFFIRMATIVE_PATTERN = /^(yes|y|yeah|yep|yup|sure|ok|okay|go ahead|please do|do it|confirm|sounds good)\b/i;
+
+const WELCOME_PROMPTS_ROUTE = [
   "Hey! What kind of day are you planning? Give me the vibe — brunch crawl, date day, shopping + coffee, whatever you're feeling.",
   "G'day! Planning a Melbourne day out? Tell me what you're in the mood for and I'll sort a route.",
   "What's the plan for today? Coffee and lookouts, food crawl, fashion stops — give me something to work with.",
@@ -120,8 +141,17 @@ const WELCOME_PROMPTS = [
   "Let's get into it. What are you after today — food, fashion, scenic stuff, or a mix of everything?"
 ];
 
-function getRandomWelcome() {
-  return WELCOME_PROMPTS[Math.floor(Math.random() * WELCOME_PROMPTS.length)];
+const WELCOME_PROMPTS_RECOMMENDATIONS = [
+  "Hey! Keen for recommendations? Tell me the vibe and suburb, and I’ll narrow it down.",
+  "G'day! What sort of places are you after — cozy cafes, bars, hidden gems, or something else?",
+  "Let’s find your top picks. Share area, vibe, and budget if you’ve got them.",
+  "Sweet, recommendation mode on. What are you in the mood for and where abouts?",
+  "I can shortlist the best spots. Start with your vibe and preferred area."
+];
+
+function getRandomWelcome(mode: ChatMode) {
+  const pool = mode === "recommendations" ? WELCOME_PROMPTS_RECOMMENDATIONS : WELCOME_PROMPTS_ROUTE;
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 /* ── helpers ───────────────────────────────────────────────── */
@@ -148,6 +178,12 @@ function getMessageText(msg: { parts: Array<{ type: string; text?: string }> }):
 function isBuildRoutePart(p: Record<string, unknown>): boolean {
   if (p.type === "tool-buildRoute") return true;
   if (p.type === "dynamic-tool" && p.toolName === "buildRoute") return true;
+  return false;
+}
+
+function isRetrieveLocationsPart(p: Record<string, unknown>): boolean {
+  if (p.type === "tool-retrieveLocations") return true;
+  if (p.type === "dynamic-tool" && p.toolName === "retrieveLocations") return true;
   return false;
 }
 
@@ -754,16 +790,17 @@ function StopCard({
   );
 }
 
-/* ── v5 chat transport (stable ref) ────────────────────────── */
-const chatTransport = new DefaultChatTransport({ api: "/api/chat" });
-
 /* ── Main shell ────────────────────────────────────────────── */
 export function PlannerShell() {
+  const [chatMode, setChatMode] = useState<ChatMode>("route-planning");
   const [venues, setVenues] = useState<Venue[]>([]);
   const [activeStopId, setActiveStopId] = useState<string | null>(null);
-  const [welcomeMsg] = useState(getRandomWelcome);
-  const [placeholder] = useState(() => PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)]);
+  const [welcomeByMode] = useState<Record<ChatMode, string>>(() => ({
+    "route-planning": getRandomWelcome("route-planning"),
+    recommendations: getRandomWelcome("recommendations"),
+  }));
   const [input, setInput] = useState("");
+  const [pendingModeSwitchMessage, setPendingModeSwitchMessage] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
   const [venueSearch, setVenueSearch] = useState("");
   const [selectedVenueId, setSelectedVenueId] = useState<string | null>(null);
@@ -774,6 +811,7 @@ export function PlannerShell() {
     "welcome" | "windy" | "map" | "chat" | "typing" | "done"
   >("welcome");
   const [typedChars, setTypedChars] = useState(0);
+  const welcomeMsg = welcomeByMode[chatMode];
 
   /* Lazy-load venues from API instead of bundling 283KB JSON into client */
   useEffect(() => {
@@ -831,9 +869,15 @@ export function PlannerShell() {
     return result;
   }, [categoryFilter, venueSearch, venues]);
 
+  const activeTransport = useMemo(
+    () => new DefaultChatTransport({ api: "/api/chat", body: { mode: chatMode } }),
+    [chatMode]
+  );
+
   // v5 useChat — transport-based, sendMessage API
   const { messages, sendMessage, status } = useChat({
-    transport: chatTransport,
+    id: `planner-${chatMode}`,
+    transport: activeTransport,
     messages: [
       {
         id: "welcome",
@@ -872,6 +916,18 @@ export function PlannerShell() {
             travelMode?: TravelMode;
             maxStops?: number;
           };
+        }
+      }
+    }
+    return null;
+  }, [messages]);
+
+  const recommendations = useMemo<RecommendationsResponse | null>(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      for (const part of messages[i].parts) {
+        const p = part as any;
+        if (isRetrieveLocationsPart(p) && p.state === "output-available" && p.output) {
+          return p.output as RecommendationsResponse;
         }
       }
     }
@@ -960,11 +1016,51 @@ export function PlannerShell() {
     return text.trim().length > 0;
   });
 
+  const placeholder = useMemo(() => {
+    const pool = chatMode === "recommendations" ? RECOMMENDATION_PLACEHOLDERS : PLACEHOLDERS;
+    return pool[Math.floor(Math.random() * pool.length)];
+  }, [chatMode]);
+
+  const lastAssistantText = useMemo(() => {
+    for (let i = visibleMessages.length - 1; i >= 0; i--) {
+      if ((visibleMessages[i].role as string) === "assistant") {
+        return getMessageText(visibleMessages[i]);
+      }
+    }
+    return "";
+  }, [visibleMessages]);
+
+  useEffect(() => {
+    if (chatMode !== "route-planning") return;
+    if (!pendingModeSwitchMessage) return;
+    sendMessage({ text: pendingModeSwitchMessage });
+    setPendingModeSwitchMessage(null);
+  }, [chatMode, pendingModeSwitchMessage, sendMessage]);
+
+  useEffect(() => {
+    if (chatMode === "recommendations") {
+      setActiveStopId(null);
+    } else {
+      setSelectedVenueId(null);
+    }
+  }, [chatMode]);
+
   // Send handler
   function handleSend() {
     const text = input.trim();
     if (!text || isBusy) return;
     setInput("");
+
+    if (
+      chatMode === "recommendations" &&
+      AFFIRMATIVE_PATTERN.test(text.toLowerCase()) &&
+      ROUTE_SWITCH_CONFIRM_PATTERN.test(lastAssistantText.toLowerCase())
+    ) {
+      setPendingModeSwitchMessage(text);
+      setChatMode("route-planning");
+      return;
+    }
+
     sendMessage({ text });
   }
 
@@ -1033,7 +1129,88 @@ export function PlannerShell() {
         <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide">
           <div className="p-5 space-y-5">
 
-            {itinerary ? (
+            {chatMode === "recommendations" ? (
+              <>
+                <Card className="border-primary/20 bg-primary/5 shadow-none">
+                  <CardHeader className="px-4 pt-4 pb-2">
+                    <CardDescription className="text-[0.6rem] font-semibold tracking-[0.12em] uppercase text-primary/80">
+                      Recommendations mode
+                    </CardDescription>
+                    <CardTitle className="text-sm font-semibold">
+                      Top picks for your vibe
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-4 pb-4">
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      I will ask for any missing details (area, vibe, budget), then recommend the best 5 matches.
+                    </p>
+                  </CardContent>
+                </Card>
+
+                {recommendations?.error ? (
+                  <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
+                    <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">Recommendations unavailable</p>
+                    <p className="text-xs text-amber-700/90 dark:text-amber-200/90 mt-1.5">
+                      {recommendations.error}
+                    </p>
+                    <p className="text-xs text-amber-700/80 dark:text-amber-200/80 mt-1">
+                      Check your Chroma environment variables in `.env.local`.
+                    </p>
+                  </div>
+                ) : recommendations?.results?.length ? (
+                  <div className="space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-semibold">Top 5 places</h3>
+                      <span className="text-xs text-muted-foreground">{recommendations.results.length} results</span>
+                    </div>
+                    <p className="text-[0.7rem] text-muted-foreground">Search: {recommendations.queryText}</p>
+                    {recommendations.results.slice(0, 5).map((result, i) => (
+                      <Card key={`${result.id}-${i}`} className="border-border/30 bg-card/40 shadow-none py-0">
+                        <CardContent className="p-3 space-y-1.5">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold truncate">{result.name}</p>
+                              <p className="text-[0.65rem] text-muted-foreground">
+                                {(result.suburb ?? result.city ?? "Melbourne")} · {result.category ?? "place"}
+                              </p>
+                            </div>
+                            <Badge variant="outline" className="font-mono text-[0.6rem] shrink-0">
+                              {result.score}
+                            </Badge>
+                          </div>
+                          <p className="text-[0.65rem] text-muted-foreground/80 leading-relaxed">{result.reason}</p>
+                          <div className="flex items-center gap-2 pt-1">
+                            {result.googleMapsUrl && (
+                              <Button size="sm" variant="outline" className="h-7 text-[0.65rem]" asChild>
+                                <a href={result.googleMapsUrl} target="_blank" rel="noreferrer">
+                                  <ArrowUpRight className="size-3" />
+                                  Maps
+                                </a>
+                              </Button>
+                            )}
+                            {result.website && (
+                              <Button size="sm" variant="outline" className="h-7 text-[0.65rem]" asChild>
+                                <a href={result.website} target="_blank" rel="noreferrer">
+                                  <ExternalLink className="size-3" />
+                                  Website
+                                </a>
+                              </Button>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-border/30 bg-card/30 p-4">
+                    <p className="text-sm font-semibold">No recommendations yet</p>
+                    <p className="text-xs text-muted-foreground mt-1.5">
+                      Tell me what you are after and I will narrow it down with a couple quick questions.
+                    </p>
+                  </div>
+                )}
+              </>
+            ) : itinerary ? (
               <>
                 {/* Route overview */}
                 <Card className="border-primary/20 bg-primary/5 shadow-none">
@@ -1227,6 +1404,34 @@ export function PlannerShell() {
         >
           <ArrowUpRight className="size-2.5" />
         </button>
+        <div className="shrink-0 px-4 pt-4 pb-2">
+          <div className="inline-flex rounded-full border border-border/40 bg-muted/30 p-1">
+            <button
+              type="button"
+              onClick={() => setChatMode("route-planning")}
+              className={cn(
+                "px-3 py-1.5 text-[0.68rem] rounded-full transition-all",
+                chatMode === "route-planning"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              Route Planning
+            </button>
+            <button
+              type="button"
+              onClick={() => setChatMode("recommendations")}
+              className={cn(
+                "px-3 py-1.5 text-[0.68rem] rounded-full transition-all",
+                chatMode === "recommendations"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              Recommendations
+            </button>
+          </div>
+        </div>
         {/* conversation */}
         <Conversation className="flex-1 min-h-0">
           <ConversationContent className="gap-5 px-5 py-5">
@@ -1291,7 +1496,7 @@ export function PlannerShell() {
         <div className="shrink-0 px-4 pb-4 pt-2 space-y-2.5">
           {messages.length <= 1 && (
             <div className="flex flex-col gap-2 px-1">
-              {SUGGESTIONS.map((s, i) => (
+              {SUGGESTIONS[chatMode].map((s, i) => (
                 <button
                   key={s}
                   type="button"
