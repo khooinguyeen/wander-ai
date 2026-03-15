@@ -65,20 +65,22 @@ export async function buildItinerary(request: PlanRequest): Promise<ItineraryRes
   // Collect directions data as the agent calls getDirections
   const directionsCache: Record<string, { distanceKm: number; durationMinutes: number; summary: string }> = {};
 
-  const model = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite-preview";
+  const model = process.env.GEMINI_MODEL || "gemini-2.0-flash-lite";
 
-  const { toolResults } = await generateText({
-    model: google(model),
-    system: PLANNER_SYSTEM,
-    prompt: JSON.stringify({
-      userRequest: {
-        query: request.query,
-        startLocation: request.startLocation || "CBD",
-        travelMode: request.travelMode,
-        maxStops: request.maxStops,
-      },
-      totalSpotsInDatabase: allSpots.length,
-    }),
+  let toolResults: Awaited<ReturnType<typeof generateText>>["toolResults"] = [];
+  try {
+    ({ toolResults } = await generateText({
+      model: google(model),
+      system: PLANNER_SYSTEM,
+      prompt: JSON.stringify({
+        userRequest: {
+          query: request.query,
+          startLocation: request.startLocation || "CBD",
+          travelMode: request.travelMode,
+          maxStops: request.maxStops,
+        },
+        totalSpotsInDatabase: allSpots.length,
+      }),
     tools: {
       searchSpots: tool({
         description: "Search the Melbourne spots database. Returns spots ranked by relevance to the query. You can filter by kind (food/lookout/fashion) and area.",
@@ -146,18 +148,64 @@ export async function buildItinerary(request: PlanRequest): Promise<ItineraryRes
         },
       }),
     },
-    stopWhen: stepCountIs(8),
-  });
-
-  // Extract the finalizePlan call from tool results
-  const finalizeCall = toolResults.find((r) => r.toolName === "finalizePlan");
-
-  if (!finalizeCall) {
-    throw new Error("Gemini planner did not call finalizePlan");
+      stopWhen: stepCountIs(8),
+    }));
+  } catch (err) {
+    console.error("[buildItinerary] inner agent failed, using heuristic fallback:", err);
   }
 
-  const plan = finalizeCall.input as z.infer<typeof itineraryOutputSchema>;
-  return assemblePlan(plan, request, spotsById, directionsCache);
+  // Extract the finalizePlan call from tool results (may be empty if agent failed)
+  const finalizeCall = toolResults.find((r) => r.toolName === "finalizePlan");
+
+  if (finalizeCall) {
+    const plan = finalizeCall.input as z.infer<typeof itineraryOutputSchema>;
+    return assemblePlan(plan, request, spotsById, directionsCache);
+  }
+
+  // Heuristic fallback: pick top searchSpots results and assemble directly
+  console.warn("[buildItinerary] using heuristic fallback — finalizePlan not called");
+  return buildHeuristicItinerary(request, spotsById, directionsCache);
+}
+
+/* ── heuristic fallback when inner agent doesn't call finalizePlan ── */
+
+function buildHeuristicItinerary(
+  request: PlanRequest,
+  spotsById: Map<string, Spot>,
+  directionsCache: Record<string, { distanceKm: number; durationMinutes: number; summary: string }>,
+): ItineraryResponse {
+  const topSpots = searchSpots({
+    query: request.query,
+    startLocation: request.startLocation,
+    maxResults: Math.max(request.maxStops * 3, 12),
+  });
+
+  const selected = topSpots.slice(0, request.maxStops);
+  const startHour = 9;
+  let clock = startHour * 60; // minutes since midnight
+
+  const stops: z.infer<typeof itineraryOutputSchema>["stops"] = selected.map((spot) => {
+    const arrival = `${Math.floor(clock / 60)}:${String(clock % 60).padStart(2, "0")} ${clock < 720 ? "AM" : "PM"}`;
+    clock += spot.idealVisitMinutes;
+    const depart = `${Math.floor(clock / 60)}:${String(clock % 60).padStart(2, "0")} ${clock < 720 ? "AM" : "PM"}`;
+    clock += 20; // travel buffer
+    return {
+      spotId: spot.id,
+      reason: `${spot.matchReason}. A great pick for ${request.query}.`,
+      arrivalTime: arrival,
+      departureTime: depart,
+    };
+  });
+
+  const syntheticPlan: z.infer<typeof itineraryOutputSchema> = {
+    dayTheme: `Melbourne ${request.query.split(" ").slice(0, 4).join(" ")} Day`,
+    summary: `A curated ${selected.length}-stop route through ${summarizeAreas(selected)} based on your preferences.`,
+    routeRationale: "Ordered by relevance and geographic compactness.",
+    stops,
+    backupSpotIds: topSpots.slice(request.maxStops, request.maxStops + 3).map((s) => s.id),
+  };
+
+  return assemblePlan(syntheticPlan, request, spotsById, directionsCache);
 }
 
 /* ── assemble the final ItineraryResponse ───────────────────── */

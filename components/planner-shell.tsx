@@ -55,6 +55,7 @@ import type {
   ChatMode,
   ItineraryResponse,
   PlannedStop,
+  RecommendationItem,
   RecommendationsResponse,
   TravelMode,
   Venue,
@@ -205,8 +206,21 @@ function extractFitSignals(reason: string): string[] {
   return Array.from(new Set(signals)).slice(0, 4);
 }
 
-function getClarifierChips(lastAssistantText: string, mode: ChatMode): string[] {
+function similarityLevelLabel(score: number): "Very high" | "High" | "Medium" | "Low" {
+  if (score >= 1.2) return "Very high";
+  if (score >= 0.9) return "High";
+  if (score >= 0.6) return "Medium";
+  return "Low";
+}
+
+function getQuestionClarifierChips(lastAssistantText: string, mode: ChatMode): string[] {
+  if (!lastAssistantText.includes("?")) return [];
   const text = lastAssistantText.toLowerCase();
+
+  // Skip chips for broad confirmation/refinement questions.
+  if (/anything else|look like what you had in mind|explore other options|different vibe|different area|route for your day|switch to route/.test(text)) {
+    return [];
+  }
 
   if (/coffee|cafe|matcha|espresso/.test(text)) {
     return [
@@ -247,16 +261,80 @@ function getClarifierChips(lastAssistantText: string, mode: ChatMode): string[] 
     ];
   }
 
-  if (mode === "recommendations") {
+  if (mode === "recommendations" && /what are you in the mood|what kind of place|what vibe/.test(text)) {
     return [
-      "Hidden cafes in Fitzroy",
-      "Budget brunch in Carlton",
-      "Rooftop bars in CBD",
-      "Shopping + coffee in Brunswick"
+      "Hidden cafes near Fitzroy",
+      "Rooftop bars for date night",
+      "Budget brunch spots",
+      "Shopping + coffee combo"
     ];
   }
 
   return [];
+}
+
+function getRecommendationRefinementChips(
+  queryText: string,
+  results: RecommendationItem[]
+): string[] {
+  if (!queryText.trim() || results.length === 0) return [];
+
+  const areaCounts = new Map<string, number>();
+  for (const r of results) {
+    const area = r.suburb ?? r.city ?? "Melbourne";
+    areaCounts.set(area, (areaCounts.get(area) ?? 0) + 1);
+  }
+
+  const rankedAreas = Array.from(areaCounts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([area]) => area);
+
+  const primaryArea = rankedAreas[0] ?? "CBD";
+  const secondaryArea = rankedAreas[1] ?? null;
+
+  const query = queryText.toLowerCase();
+  const chips: string[] = [];
+
+  chips.push(`Keep ${primaryArea} but make it budget-friendly`);
+  chips.push(`Keep ${primaryArea} but make it premium`);
+
+  if (/coffee|cafe|espresso|matcha/.test(query)) {
+    chips.push(`Specialty coffee only in ${primaryArea}`);
+    chips.push(`More hidden cafes around ${primaryArea}`);
+  } else if (/brunch|lunch|dinner|restaurant|food/.test(query)) {
+    chips.push(`Different cuisine options in ${primaryArea}`);
+    chips.push(`More hidden food spots around ${primaryArea}`);
+  } else {
+    chips.push(`More hidden gems near ${primaryArea}`);
+  }
+
+  if (secondaryArea) {
+    chips.push(`Try ${secondaryArea} instead of ${primaryArea}`);
+    chips.push(`Split picks between ${primaryArea} and ${secondaryArea}`);
+  } else {
+    chips.push(`Try nearby suburbs instead of ${primaryArea}`);
+  }
+
+  chips.push("Switch to route planning with these picks");
+
+  return Array.from(new Set(chips)).slice(0, 6);
+}
+
+function isBroadRefinementTurn(lastAssistantText: string): boolean {
+  const text = lastAssistantText.toLowerCase();
+  return /anything else|look like what you had in mind|explore other options|different vibe|different area|route for your day|switch to route/.test(text);
+}
+
+function inferModeFromText(text: string, currentMode: ChatMode, isFirstMessage: boolean): ChatMode {
+  // Only infer on the very first user message — never flip mode mid-conversation
+  if (!isFirstMessage) return currentMode;
+
+  const routeIntent = /(route|itinerary|plan\s+(my|a)\s+day|day\s+plan|map\s+out|start\s+from|how\s+many\s+stops|stops?\s+for\s+the\s+day)/i;
+  const recommendationIntent = /(recommend\s+me|what.*recommend|give.*recommendation|suggest.*place|find.*place|what.*near|hidden\s+gem)/i;
+
+  if (routeIntent.test(text)) return "route-planning";
+  if (recommendationIntent.test(text)) return "recommendations";
+  return currentMode;
 }
 
 /* ── helpers for venues ───────────────────────────────────── */
@@ -341,6 +419,39 @@ function VenueCard({
           )}
         </div>
       </button>
+    </div>
+  );
+}
+
+function RecommendationPhotoPane({
+  venue,
+  fallbackIcon,
+}: {
+  venue: Venue | undefined;
+  fallbackIcon: React.ReactNode;
+}) {
+  const placeId = venue?.google_place_id;
+  const { url: photoUrl, loaded: photoLoaded, ref: photoRef } = usePlacePhoto(placeId);
+
+  return (
+    <div ref={photoRef} className="relative h-full min-h-[90px]">
+      {photoUrl ? (
+        <img
+          src={photoUrl}
+          alt={venue?.name ?? "Recommended place"}
+          className="absolute inset-0 w-full h-full object-cover"
+          loading="lazy"
+        />
+      ) : (
+        <div className={cn(
+          "absolute inset-0 venue-card-placeholder",
+          !photoLoaded && "animate-pulse"
+        )}>
+          <span className="absolute inset-0 grid place-items-center text-muted-foreground/15">
+            {fallbackIcon}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -865,6 +976,7 @@ function StopCard({
 /* ── Main shell ────────────────────────────────────────────── */
 export function PlannerShell() {
   const [chatMode, setChatMode] = useState<ChatMode>("route-planning");
+  const activeMode = chatMode;
   const [venues, setVenues] = useState<Venue[]>([]);
   const [activeStopId, setActiveStopId] = useState<string | null>(null);
   const [welcomeByMode] = useState<Record<ChatMode, string>>(() => ({
@@ -948,7 +1060,7 @@ export function PlannerShell() {
 
   // v5 useChat — transport-based, sendMessage API
   const { messages, sendMessage, status } = useChat({
-    id: `planner-${chatMode}`,
+    id: "planner-shared",
     transport: activeTransport,
     messages: [
       {
@@ -965,10 +1077,27 @@ export function PlannerShell() {
   const itinerary = useMemo<ItineraryResponse | null>(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       for (const part of messages[i].parts) {
-
         const p = part as any;
         if (isBuildRoutePart(p) && p.state === "output-available" && p.output) {
-          return p.output as ItineraryResponse;
+          const out = p.output as ItineraryResponse & { error?: string };
+          // If the tool returned a structured error, skip this result
+          if (out.error && (!out.stops || out.stops.length === 0)) return null;
+          return out;
+        }
+      }
+    }
+    return null;
+  }, [messages]);
+
+  const routeBuildError = useMemo<string | null>(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      for (const part of messages[i].parts) {
+        const p = part as any;
+        if (isBuildRoutePart(p)) {
+          if (p.state === "output-error") return p.errorText ?? "Route building failed.";
+          if (p.state === "output-available" && p.output?.error && (!p.output.stops || p.output.stops.length === 0)) {
+            return p.output.error;
+          }
         }
       }
     }
@@ -1006,6 +1135,32 @@ export function PlannerShell() {
     return null;
   }, [messages]);
 
+  const recommendationVenueIds = useMemo(
+    () => (recommendations?.results ?? []).slice(0, 5).map((r) => r.id),
+    [recommendations]
+  );
+
+  const recommendationVenueLookup = useMemo(() => {
+    const map = new Map<string, Venue>();
+    for (const venue of venues) {
+      map.set(venue.id, venue);
+    }
+    return map;
+  }, [venues]);
+
+  const mapVenues = useMemo(() => {
+    if (activeMode !== "recommendations") return filteredVenues;
+    if (recommendationVenueIds.length === 0) return [];
+    return recommendationVenueIds
+      .map((id) => recommendationVenueLookup.get(id))
+      .filter((v): v is Venue => !!v);
+  }, [activeMode, filteredVenues, recommendationVenueIds, recommendationVenueLookup]);
+
+  const topRecommendationVenueId = useMemo(
+    () => (activeMode === "recommendations" ? recommendationVenueIds[0] ?? null : null),
+    [activeMode, recommendationVenueIds]
+  );
+
   // Is the tool currently executing?
   const isPlanning = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -1031,6 +1186,11 @@ export function PlannerShell() {
     itinerary?.stops.find((s) => s.spot.id === activeStopId) ??
     itinerary?.stops[0] ??
     null;
+
+  const highlightedVenue = useMemo(
+    () => (activeStop ? venues.find((v) => v.id === activeStop.spot.id) ?? null : null),
+    [activeStop, venues]
+  );
 
   const workspacePhase = itinerary
     ? "ready"
@@ -1102,13 +1262,51 @@ export function PlannerShell() {
     return "";
   }, [visibleMessages]);
 
-  const clarifierChips = useMemo(
-    () => getClarifierChips(lastAssistantText, chatMode),
+  const questionClarifierChips = useMemo(
+    () => getQuestionClarifierChips(lastAssistantText, chatMode),
     [lastAssistantText, chatMode]
   );
 
+  const refinementChips = useMemo(() => {
+    if (chatMode !== "recommendations") return [];
+    const isQuestion = lastAssistantText.includes("?");
+    if (isQuestion && !isBroadRefinementTurn(lastAssistantText)) return [];
+    return getRecommendationRefinementChips(
+      recommendations?.queryText ?? "",
+      recommendations?.results ?? []
+    );
+  }, [chatMode, lastAssistantText, recommendations]);
+
+  const dedupedActiveChips = useMemo(() => {
+    const chips = questionClarifierChips.length > 0 ? questionClarifierChips : refinementChips;
+    const seed = new Set(
+      SUGGESTIONS[chatMode].map((s) => s.toLowerCase().replace(/\s+/g, " ").trim())
+    );
+    return chips.filter((chip) => {
+      const normalized = chip.toLowerCase().replace(/\s+/g, " ").trim();
+      if (seed.has(normalized)) return false;
+      seed.add(normalized);
+      return true;
+    });
+  }, [questionClarifierChips, refinementChips, chatMode]);
+
+  const hasUserMessage = useMemo(
+    () => visibleMessages.some((m) => (m.role as string) === "user"),
+    [visibleMessages]
+  );
+
+  const isAssistantTurn = useMemo(() => {
+    const last = visibleMessages[visibleMessages.length - 1];
+    return !!last && (last.role as string) === "assistant";
+  }, [visibleMessages]);
+
+  const shouldShowActionChips =
+    !isBusy &&
+    hasUserMessage &&
+    isAssistantTurn &&
+    dedupedActiveChips.length > 0;
+
   useEffect(() => {
-    if (chatMode !== "route-planning") return;
     if (!pendingModeSwitchMessage) return;
     sendMessage({ text: pendingModeSwitchMessage });
     setPendingModeSwitchMessage(null);
@@ -1127,6 +1325,13 @@ export function PlannerShell() {
     const text = input.trim();
     if (!text || isBusy) return;
     setInput("");
+
+    const inferredMode = inferModeFromText(text, chatMode, !hasUserMessage);
+    if (inferredMode !== chatMode) {
+      setPendingModeSwitchMessage(text);
+      setChatMode(inferredMode);
+      return;
+    }
 
     if (
       chatMode === "recommendations" &&
@@ -1168,7 +1373,8 @@ export function PlannerShell() {
         <RouteMap
           stops={itinerary?.stops ?? []}
           previewSpots={itinerary ? itinerary.candidates : []}
-          venues={filteredVenues}
+          venues={mapVenues}
+          topRecommendationVenueId={topRecommendationVenueId}
           activeStopId={activeStopId}
           selectedVenueId={selectedVenueId}
           onSelectStop={setActiveStopId}
@@ -1208,22 +1414,6 @@ export function PlannerShell() {
 
             {chatMode === "recommendations" ? (
               <>
-                <Card className="border-primary/20 bg-primary/5 shadow-none">
-                  <CardHeader className="px-4 pt-4 pb-2">
-                    <CardDescription className="text-[0.6rem] font-semibold tracking-[0.12em] uppercase text-primary/80">
-                      Recommendations mode
-                    </CardDescription>
-                    <CardTitle className="text-sm font-semibold">
-                      Top picks for your vibe
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="px-4 pb-4">
-                    <p className="text-xs text-muted-foreground leading-relaxed">
-                      I will clarify missing details (coffee type or cuisine, area, budget, transport), then run multiple searches and return the best personalized 5.
-                    </p>
-                  </CardContent>
-                </Card>
-
                 {recommendations?.error ? (
                   <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
                     <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">Recommendations unavailable</p>
@@ -1242,49 +1432,71 @@ export function PlannerShell() {
                     </div>
                     <p className="text-[0.7rem] text-muted-foreground">Search: {recommendations.queryText}</p>
                     {recommendations.results.slice(0, 5).map((result, i) => (
-                      <Card key={`${result.id}-${i}`} className="border-border/30 bg-card/40 shadow-none py-0">
-                        <CardContent className="p-3 space-y-1.5">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <p className="text-xs font-semibold truncate">{result.name}</p>
-                              <p className="text-[0.65rem] text-muted-foreground">
-                                {(result.suburb ?? result.city ?? "Melbourne")} · {result.category ?? "place"}
-                              </p>
+                      <div key={`${result.id}-${i}`} className="space-y-1.5">
+                        {(() => {
+                          const venueMeta = recommendationVenueLookup.get(result.id);
+                          const icon = venueMeta ? (CATEGORY_ICON_SM[venueMeta.uiCategory] ?? <MapPin className="size-3" />) : <MapPin className="size-3" />;
+                          const area = result.suburb ?? result.city ?? "Melbourne";
+                          const level = similarityLevelLabel(result.score);
+                          const fitSignals = extractFitSignals(result.reason);
+                          return (
+                            <div className={cn(
+                              "venue-card w-full rounded-xl border border-border/40 bg-card/40 overflow-hidden transition-all hover:border-border/60 hover:bg-card/60",
+                              i === 0 && "border-primary/60 bg-primary/8 shadow-[0_0_0_1px_oklch(0.68_0.16_252/0.45)]"
+                            )}>
+                              <div className="grid grid-cols-[1fr_100px]">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedVenueId(result.id)}
+                                  className="p-3 space-y-1 text-left min-w-0"
+                                >
+                                  <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground/60 min-w-0">
+                                    {icon}
+                                    <span className="text-[0.6rem] capitalize">{result.category ?? venueMeta?.uiCategory ?? "place"}</span>
+                                    {venueMeta && priceLabel(venueMeta.price_level) && (
+                                      <span className="text-[0.6rem]">{priceLabel(venueMeta.price_level)}</span>
+                                    )}
+                                    {i === 0 && (
+                                      <Badge variant="secondary" className="text-[0.58rem] font-semibold">Top pick</Badge>
+                                    )}
+                                  </div>
+                                  <h3 className="text-sm font-semibold leading-tight break-words line-clamp-2">{result.name}</h3>
+                                  <p className="text-[0.65rem] text-muted-foreground">{area}</p>
+                                  <p className="text-[0.65rem] text-muted-foreground/80 leading-relaxed break-words line-clamp-3">{result.reason}</p>
+                                  <div className="flex flex-wrap items-center gap-1.5 pt-0.5 min-w-0">
+                                    <Badge variant="outline" className="text-[0.6rem]">Similarity: {level}</Badge>
+                                    {fitSignals.slice(0, 2).map((signal) => (
+                                      <Badge key={`${result.id}-${signal}`} variant="secondary" className="text-[0.6rem] font-medium capitalize">
+                                        {signal.replace("-", " ")}
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                </button>
+                                <RecommendationPhotoPane venue={venueMeta} fallbackIcon={icon} />
+                              </div>
+
+                              <div className="px-3 pb-3 flex flex-wrap items-center gap-2">
+                                {result.googleMapsUrl && (
+                                  <Button size="sm" variant="outline" className="h-7 text-[0.65rem]" asChild>
+                                    <a href={result.googleMapsUrl} target="_blank" rel="noreferrer">
+                                      <ArrowUpRight className="size-3" />
+                                      Maps
+                                    </a>
+                                  </Button>
+                                )}
+                                {result.website && (
+                                  <Button size="sm" variant="outline" className="h-7 text-[0.65rem]" asChild>
+                                    <a href={result.website} target="_blank" rel="noreferrer">
+                                      <ExternalLink className="size-3" />
+                                      Website
+                                    </a>
+                                  </Button>
+                                )}
+                              </div>
                             </div>
-                            <Badge variant="outline" className="font-mono text-[0.6rem] shrink-0">
-                              {result.score.toFixed(2)}
-                            </Badge>
-                          </div>
-                          <p className="text-[0.65rem] text-muted-foreground/80 leading-relaxed">{result.reason}</p>
-                          {extractFitSignals(result.reason).length > 0 && (
-                            <div className="flex flex-wrap gap-1.5 pt-0.5">
-                              {extractFitSignals(result.reason).map((signal) => (
-                                <Badge key={`${result.id}-${signal}`} variant="secondary" className="text-[0.6rem] font-medium capitalize">
-                                  {signal.replace("-", " ")}
-                                </Badge>
-                              ))}
-                            </div>
-                          )}
-                          <div className="flex items-center gap-2 pt-1">
-                            {result.googleMapsUrl && (
-                              <Button size="sm" variant="outline" className="h-7 text-[0.65rem]" asChild>
-                                <a href={result.googleMapsUrl} target="_blank" rel="noreferrer">
-                                  <ArrowUpRight className="size-3" />
-                                  Maps
-                                </a>
-                              </Button>
-                            )}
-                            {result.website && (
-                              <Button size="sm" variant="outline" className="h-7 text-[0.65rem]" asChild>
-                                <a href={result.website} target="_blank" rel="noreferrer">
-                                  <ExternalLink className="size-3" />
-                                  Website
-                                </a>
-                              </Button>
-                            )}
-                          </div>
-                        </CardContent>
-                      </Card>
+                          );
+                        })()}
+                      </div>
                     ))}
                   </div>
                 ) : (
@@ -1327,33 +1539,25 @@ export function PlannerShell() {
                   </CardContent>
                 </Card>
 
-                {/* Highlighted stop */}
-                {activeStop && (
+                {/* Highlighted stop - reuse original venue detail card */}
+                {highlightedVenue ? (
+                  <VenueDetail
+                    venue={highlightedVenue}
+                    onClose={() => setActiveStopId(null)}
+                  />
+                ) : activeStop ? (
                   <Card className="border-border/30 bg-card/40 shadow-none">
                     <CardContent className="p-4 space-y-1">
                       <p className="text-[0.6rem] font-semibold tracking-[0.12em] uppercase text-primary/80">
                         Highlighted
                       </p>
-                      <p className="text-sm font-semibold text-foreground">
-                        {activeStop.spot.name}
-                      </p>
+                      <p className="text-sm font-semibold text-foreground">{activeStop.spot.name}</p>
                       <p className="text-xs text-muted-foreground">
-                        {activeStop.arrivalTime} &middot; {activeStop.spot.area} &middot;{" "}
-                        {activeStop.spot.address}
+                        {activeStop.arrivalTime} &middot; {activeStop.spot.area}
                       </p>
-                      <p className="text-xs text-muted-foreground/70 leading-relaxed pt-1">
-                        {activeStop.spot.description}
-                      </p>
-                      <div className="flex flex-wrap gap-1 pt-1.5">
-                        {activeStop.spot.vibeTags.slice(0, 4).map((tag) => (
-                          <Badge key={tag} variant="outline" className="text-[0.6rem] font-normal">
-                            {tag}
-                          </Badge>
-                        ))}
-                      </div>
                     </CardContent>
                   </Card>
-                )}
+                ) : null}
 
                 {/* Stops timeline */}
                 <div>
@@ -1434,6 +1638,12 @@ export function PlannerShell() {
                   </a>
                 </Button>
               </>
+            ) : routeBuildError ? (
+              <div className="rounded-xl border border-destructive/30 bg-destructive/8 p-4 space-y-2">
+                <p className="text-sm font-semibold text-destructive">Route build failed</p>
+                <p className="text-xs text-muted-foreground leading-relaxed">{routeBuildError}</p>
+                <p className="text-xs text-muted-foreground/60">Tell me to try again and I&apos;ll rebuild the route.</p>
+              </div>
             ) : isPlanning ? (
               <div className="grid gap-4 py-8 justify-items-center text-center">
                 <div className="grid place-items-center size-12 rounded-2xl bg-primary/15 text-primary animate-pulse">
@@ -1491,31 +1701,8 @@ export function PlannerShell() {
           <ArrowUpRight className="size-2.5" />
         </button>
         <div className="shrink-0 px-4 pt-4 pb-2">
-          <div className="inline-flex rounded-full border border-border/40 bg-muted/30 p-1">
-            <button
-              type="button"
-              onClick={() => setChatMode("route-planning")}
-              className={cn(
-                "px-3 py-1.5 text-[0.68rem] rounded-full transition-all",
-                chatMode === "route-planning"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              Route Planning
-            </button>
-            <button
-              type="button"
-              onClick={() => setChatMode("recommendations")}
-              className={cn(
-                "px-3 py-1.5 text-[0.68rem] rounded-full transition-all",
-                chatMode === "recommendations"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              Recommendations
-            </button>
+          <div className="inline-flex rounded-full border border-border/40 bg-muted/30 px-3 py-1.5 text-[0.68rem] text-muted-foreground">
+            Adaptive mode: {chatMode === "route-planning" ? "Route planning" : "Recommendations"}
           </div>
         </div>
         {/* conversation */}
@@ -1598,9 +1785,9 @@ export function PlannerShell() {
             </div>
           )}
 
-          {!isBusy && clarifierChips.length > 0 && (
+          {shouldShowActionChips && (
             <div className="flex flex-wrap gap-1.5 px-1">
-              {clarifierChips.map((chip) => (
+              {dedupedActiveChips.map((chip) => (
                 <button
                   key={chip}
                   type="button"

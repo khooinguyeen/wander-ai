@@ -346,6 +346,18 @@ html:not(.dark) .floating-pill {
 }
 
 /* ── Google Maps markers (rendered inside AdvancedMarker) ─── */
+
+@keyframes stop-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.3) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
 /* ── pill markers ─────────────────────────────────────────── */
 .pill-marker {
   display: flex;
@@ -463,6 +475,25 @@ html:not(.dark) .pill-marker__label {
 /* Venue collapsed — just the icon circle */
 .pill-marker--venue {
   padding: 0;
+}
+
+.pill-marker--top-rec {
+  transform: scale(1.12);
+  box-shadow:
+    0 6px 18px oklch(0 0 0 / 0.28),
+    0 0 0 2px oklch(0.72 0.18 85 / 0.65);
+}
+
+.pill-marker--top-rec .pill-marker__icon {
+  box-shadow: 0 0 0 2px oklch(1 0 0 / 0.7);
+}
+
+.fallback-pin--top-rec {
+  width: 18px;
+  height: 18px;
+  box-shadow:
+    0 0 0 2px oklch(1 0 0 / 0.8),
+    0 0 0 5px oklch(0.72 0.18 85 / 0.45);
 }
 
 /* Current location — Google Maps blue dot style */

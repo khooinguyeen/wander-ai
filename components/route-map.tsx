@@ -22,6 +22,7 @@ type RouteMapProps = {
   stops: PlannedStop[];
   previewSpots: Spot[];
   venues: Venue[];
+  topRecommendationVenueId?: string | null;
   activeStopId: string | null;
   selectedVenueId: string | null;
   onSelectStop: (id: string) => void;
@@ -42,7 +43,7 @@ function travelModeToGoogle(mode: TravelMode): google.maps.TravelMode {
   }
 }
 
-function DirectionsRenderer({
+function AnimatedRouteRenderer({
   stops,
   travelMode
 }: {
@@ -51,30 +52,19 @@ function DirectionsRenderer({
 }) {
   const map = useMap();
   const routesLib = useMapsLibrary("routes");
-  const rendererRef = useRef<google.maps.DirectionsRenderer | null>(null);
+  const lineRef = useRef<google.maps.Polyline | null>(null);
+  const glowRef = useRef<google.maps.Polyline | null>(null);
+  const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (!map || !routesLib || stops.length < 2) {
-      if (rendererRef.current) {
-        rendererRef.current.setMap(null);
-        rendererRef.current = null;
-      }
-      return;
-    }
+    // Tear down previous
+    if (lineRef.current) { lineRef.current.setMap(null); lineRef.current = null; }
+    if (glowRef.current) { glowRef.current.setMap(null); glowRef.current = null; }
+    if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+
+    if (!map || !routesLib || stops.length < 2) return;
 
     const service = new routesLib.DirectionsService();
-    const renderer = new routesLib.DirectionsRenderer({
-      map,
-      suppressMarkers: true,
-      polylineOptions: {
-        strokeColor: "#4f8cf9",
-        strokeWeight: 4,
-        strokeOpacity: 0.85
-      }
-    });
-
-    rendererRef.current = renderer;
-
     const waypoints = stops.slice(1, -1).map((s) => ({
       location: new google.maps.LatLng(s.spot.coordinates.lat, s.spot.coordinates.lng),
       stopover: true
@@ -94,14 +84,60 @@ function DirectionsRenderer({
         travelMode: travelModeToGoogle(travelMode)
       },
       (result, status) => {
-        if (status === google.maps.DirectionsStatus.OK && result) {
-          renderer.setDirections(result);
+        if (status !== google.maps.DirectionsStatus.OK || !result) return;
+
+        // Decode full path from all legs + steps
+        const full: google.maps.LatLng[] = [];
+        for (const leg of result.routes[0].legs) {
+          for (const step of leg.steps) {
+            full.push(...step.path);
+          }
         }
+        if (full.length === 0) return;
+
+        // Glow layer
+        const glow = new google.maps.Polyline({
+          map,
+          path: [],
+          strokeColor: "#4f8cf9",
+          strokeWeight: 14,
+          strokeOpacity: 0.12,
+          zIndex: 1
+        });
+        // Main line
+        const line = new google.maps.Polyline({
+          map,
+          path: [],
+          strokeColor: "#4f8cf9",
+          strokeWeight: 4,
+          strokeOpacity: 0.88,
+          zIndex: 2
+        });
+        lineRef.current = line;
+        glowRef.current = glow;
+
+        // Animate reveal over ~1.4 s with ease-out cubic
+        const DURATION = 1400;
+        const startTs = performance.now();
+
+        function frame(now: number) {
+          const t = Math.min((now - startTs) / DURATION, 1);
+          const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic
+          const idx = Math.ceil(eased * full.length);
+          const slice = full.slice(0, idx);
+          line.setPath(slice);
+          glow.setPath(slice);
+          if (t < 1) rafRef.current = requestAnimationFrame(frame);
+        }
+
+        rafRef.current = requestAnimationFrame(frame);
       }
     );
 
     return () => {
-      renderer.setMap(null);
+      if (lineRef.current) { lineRef.current.setMap(null); lineRef.current = null; }
+      if (glowRef.current) { glowRef.current.setMap(null); glowRef.current = null; }
+      if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
     };
   }, [map, routesLib, stops, travelMode]);
 
@@ -317,6 +353,7 @@ function GoogleMapInner({
   stops,
   previewSpots,
   venues,
+  topRecommendationVenueId,
   activeStopId,
   selectedVenueId,
   onSelectStop,
@@ -412,7 +449,7 @@ function GoogleMapInner({
       />
       {showDirections && <ZoomToSelected destination={selectedDestination} />}
 
-      {hasStops && <DirectionsRenderer stops={stops} travelMode={travelMode} />}
+      {hasStops && <AnimatedRouteRenderer stops={stops} travelMode={travelMode} />}
 
       {hasStops
         ? stops.map((stop, i) => (
@@ -424,7 +461,10 @@ function GoogleMapInner({
               }}
               onClick={() => onSelectStop(stop.spot.id)}
               zIndex={activeStopId === stop.spot.id ? 100 : 10}
-              style={{ overflow: "visible" }}
+              style={{
+                overflow: "visible",
+                animation: `stop-enter 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) ${0.25 + i * 0.12}s both`
+              }}
             >
               <div
                 className={`pill-marker pill-marker--stop ${activeStopId === stop.spot.id ? "pill-marker--expanded" : ""}`}
@@ -439,6 +479,7 @@ function GoogleMapInner({
         : hasVenues
           ? venues.map((venue) => {
               const isSelected = selectedVenueId === venue.id;
+              const isTopRecommendation = topRecommendationVenueId === venue.id;
               const color = VENUE_CATEGORY_COLORS[venue.uiCategory] ?? "#3b82f6";
               const icon = VENUE_CATEGORY_ICON[venue.uiCategory] ?? <MapPin size={14} strokeWidth={2.5} color="#fff" />;
               return (
@@ -447,14 +488,14 @@ function GoogleMapInner({
                   position={{ lat: venue.lat, lng: venue.lng }}
                   title={venue.name}
                   onClick={() => onSelectVenue(venue.id)}
-                  zIndex={isSelected ? 100 : 10}
+                  zIndex={isTopRecommendation ? 120 : isSelected ? 100 : 10}
                   style={{ overflow: "visible" }}
                 >
-                  <div className={`pill-marker pill-marker--venue ${isSelected ? "pill-marker--expanded" : ""}`}>
+                  <div className={`pill-marker pill-marker--venue ${isTopRecommendation ? "pill-marker--top-rec" : ""} ${isSelected ? "pill-marker--expanded" : ""}`}>
                     <span className="pill-marker__icon" style={{ background: color }}>
                       {icon}
                     </span>
-                    {isSelected && (
+                    {(isSelected || isTopRecommendation) && (
                       <span className="pill-marker__label">{venue.name}</span>
                     )}
                   </div>
@@ -523,6 +564,7 @@ function FallbackMap({
   stops,
   previewSpots,
   venues,
+  topRecommendationVenueId,
   activeStopId,
   onSelectStop
 }: Omit<RouteMapProps, "startLocation" | "travelMode">) {
@@ -601,11 +643,12 @@ function FallbackMap({
         : hasVenues
           ? venues.map((venue) => {
               const pos = project(venue.lat, venue.lng);
+              const isTopRecommendation = topRecommendationVenueId === venue.id;
               return (
                 <button
                   key={venue.id}
                   type="button"
-                  className="fallback-pin fallback-pin--venue"
+                  className={`fallback-pin fallback-pin--venue ${isTopRecommendation ? "fallback-pin--top-rec" : ""}`}
                   style={{
                     left: `${pos.x}%`,
                     top: `${pos.y}%`,
