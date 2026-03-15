@@ -38,12 +38,32 @@ const itineraryOutputSchema = z.object({
 export async function buildItinerary(request: PlanRequest): Promise<ItineraryResponse> {
   console.log("[plan] Starting programmatic route build:", request.query);
 
-  // 1. Search for matching spots
-  const candidates = await searchSpots({
+  // 1. Load all spots and try to match specific venue names from the query
+  const allSpots = await getAllSpots();
+
+  // Try to find venues mentioned by name in the query
+  const queryLower = request.query.toLowerCase();
+  const nameMatched: Spot[] = [];
+  for (const spot of allSpots) {
+    const nameLower = spot.name.toLowerCase();
+    // Check if the venue name (or a significant part) appears in the query
+    if (nameLower.length > 3 && queryLower.includes(nameLower)) {
+      nameMatched.push(spot);
+    }
+  }
+  console.log("[plan] Name-matched venues:", nameMatched.map(s => s.name));
+
+  // Fill remaining slots with searchSpots results
+  const nameMatchedIds = new Set(nameMatched.map(s => s.id));
+  const searchResults = await searchSpots({
     query: `${request.query} ${request.startLocation || "Melbourne"}`,
     startLocation: request.startLocation,
     maxResults: request.maxStops * 3,
   });
+  const extraCandidates = searchResults.filter(s => !nameMatchedIds.has(s.id));
+
+  // Combine: name-matched first, then search results
+  const candidates = [...nameMatched, ...extraCandidates];
 
   if (candidates.length === 0) {
     throw new Error("No matching spots found for your request");
@@ -51,9 +71,12 @@ export async function buildItinerary(request: PlanRequest): Promise<ItineraryRes
 
   const spotsById = new Map(candidates.map((s) => [s.id, s]));
 
-  // 2. Pick the top N spots via nearest-neighbour ordering
+  // 2. Pick spots: prioritise name-matched, then fill with nearest-neighbour
   const picked: Spot[] = [];
-  const remaining = [...candidates.slice(0, Math.max(request.maxStops * 2, 8))];
+
+  // Add all name-matched spots first (in nearest-neighbour order)
+  const namePool = [...nameMatched];
+  const remaining = [...extraCandidates.slice(0, Math.max(request.maxStops * 2, 8))];
 
   // Start from a reasonable center if no start location coords
   let currentLat = -37.8136; // Melbourne CBD default
