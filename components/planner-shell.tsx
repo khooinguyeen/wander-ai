@@ -859,6 +859,19 @@ export function PlannerShell() {
     return null;
   }, [messages]);
 
+  // Detect if the tool errored (e.g. quota exceeded)
+  const toolError = useMemo<string | null>(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      for (const part of messages[i].parts) {
+        const p = part as any;
+        if (isBuildRoutePart(p) && p.state === "error" && p.errorText) {
+          return p.errorText as string;
+        }
+      }
+    }
+    return null;
+  }, [messages]);
+
   // Extract plan params from tool input
   const planParams = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -906,13 +919,15 @@ export function PlannerShell() {
 
   const workspacePhase = itinerary
     ? "ready"
-    : isPlanning
-      ? "planning"
-      : planParams
-        ? "briefing"
-        : messages.length > 1
+    : toolError
+      ? "error"
+      : isPlanning
+        ? "planning"
+        : planParams
           ? "briefing"
-          : "idle";
+          : messages.length > 1
+            ? "briefing"
+            : "idle";
 
   const query = planParams?.query ?? "";
   const startLocation = planParams?.startLocation ?? "";

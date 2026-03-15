@@ -1,7 +1,7 @@
-import { google } from "@ai-sdk/google";
 import { generateText, stepCountIs, tool } from "ai";
 import { z } from "zod";
 
+import { getModel } from "@/lib/ai-model";
 import { chromaSearch, chromaSearchByPreferences } from "@/lib/chroma-search";
 import { getDirections } from "@/lib/directions";
 import { buildGoogleMapsUrl } from "@/lib/routing";
@@ -73,8 +73,9 @@ function buildPlannerSystem(hasPreferences: boolean): string {
 
 ## Important
 - You can call search tools multiple times with different queries to find the right mix.
-- You MUST call getDirections at least once to validate travel times between consecutive stops.
-- You MUST call finalizePlan exactly once at the end with your final plan.`;
+- Optionally call getDirections to validate travel times between consecutive stops.
+- You MUST call finalizePlan exactly once at the end with your final plan. Do NOT forget this step — it is mandatory.
+- Keep your total tool calls minimal. A good flow: searchSpots → finalizePlan (2 calls). Only add getDirections if needed.`;
 
   return base;
 }
@@ -102,8 +103,6 @@ export async function buildItinerary(request: PlanRequest): Promise<ItineraryRes
 
   // Collect ChromaDB spots so assemblePlan can resolve IDs from both sources
   const chromaSpotsById = new Map<string, Spot>();
-
-  const model = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite-preview";
 
   // Helper to format a spot for the agent response
   function formatSpotForAgent(s: Spot & { matchScore: number }) {
@@ -219,8 +218,8 @@ export async function buildItinerary(request: PlanRequest): Promise<ItineraryRes
     ? { ...baseTools, searchByPreferences: searchByPreferencesTool }
     : baseTools;
 
-  const { toolResults } = await generateText({
-    model: google(model),
+  const { toolResults, steps } = await generateText({
+    model: getModel(),
     system: buildPlannerSystem(useChroma && hasPreferences),
     prompt: JSON.stringify({
       userRequest: {
@@ -236,19 +235,81 @@ export async function buildItinerary(request: PlanRequest): Promise<ItineraryRes
     stopWhen: stepCountIs(10),
   });
 
+  console.log(`[plan] Agent completed in ${steps.length} steps, tool calls:`, toolResults.map(r => r.toolName));
+
   // Extract the finalizePlan call from tool results
   const finalizeCall = toolResults.find((r) => r.toolName === "finalizePlan");
-
-  if (!finalizeCall) {
-    throw new Error("Gemini planner did not call finalizePlan");
-  }
-
-  const plan = finalizeCall.input as z.infer<typeof itineraryOutputSchema>;
 
   // Merge ChromaDB spots into the lookup map so assemblePlan can resolve all IDs
   const mergedSpotsById = new Map([...spotsById, ...chromaSpotsById]);
 
-  return assemblePlan(plan, request, mergedSpotsById, directionsCache);
+  if (finalizeCall) {
+    const plan = finalizeCall.input as z.infer<typeof itineraryOutputSchema>;
+    return assemblePlan(plan, request, mergedSpotsById, directionsCache);
+  }
+
+  // Fallback: agent didn't call finalizePlan — auto-build from search results
+  console.log("[plan] finalizePlan not called — using fallback auto-plan");
+
+  // Gather spots from searchSpots tool results
+  const searchResults = toolResults
+    .filter((r) => r.toolName === "searchSpots" || r.toolName === "searchByPreferences")
+    .flatMap((r) => (r.output as Array<{ id: string }>) ?? []);
+
+  // Deduplicate and take top N spots
+  const seen = new Set<string>();
+  const topSpotIds: string[] = [];
+  for (const s of searchResults) {
+    if (!seen.has(s.id) && mergedSpotsById.has(s.id)) {
+      seen.add(s.id);
+      topSpotIds.push(s.id);
+      if (topSpotIds.length >= request.maxStops) break;
+    }
+  }
+
+  // If agent returned nothing useful, fall back to in-memory search
+  if (topSpotIds.length === 0) {
+    const fallbackResults = searchSpots({
+      query: request.query,
+      startLocation: request.startLocation,
+      maxResults: request.maxStops,
+    });
+    for (const s of fallbackResults) {
+      topSpotIds.push(s.id);
+      mergedSpotsById.set(s.id, s);
+    }
+  }
+
+  // Build a synthetic plan
+  const startHour = 10;
+  const fallbackStops = topSpotIds.map((id, i) => {
+    const spot = mergedSpotsById.get(id)!;
+    const visitMin = spot.idealVisitMinutes ?? 45;
+    const arrivalMinutes = startHour * 60 + i * (visitMin + 15);
+    const departureMinutes = arrivalMinutes + visitMin;
+    const fmtTime = (m: number) => {
+      const h = Math.floor(m / 60);
+      const mm = m % 60;
+      const ampm = h >= 12 ? "PM" : "AM";
+      return `${h > 12 ? h - 12 : h}:${String(mm).padStart(2, "0")} ${ampm}`;
+    };
+    return {
+      spotId: id,
+      reason: spot.description?.slice(0, 100) || "Great spot for your day out",
+      arrivalTime: fmtTime(arrivalMinutes),
+      departureTime: fmtTime(departureMinutes),
+    };
+  });
+
+  const fallbackPlan: z.infer<typeof itineraryOutputSchema> = {
+    dayTheme: `${request.query.slice(0, 40)} day`,
+    summary: `A curated ${topSpotIds.length}-stop route based on your vibe.`,
+    routeRationale: "Spots selected by relevance to your request and proximity.",
+    stops: fallbackStops,
+    backupSpotIds: [],
+  };
+
+  return assemblePlan(fallbackPlan, request, mergedSpotsById, directionsCache);
 }
 
 /* ── assemble the final ItineraryResponse ───────────────────── */

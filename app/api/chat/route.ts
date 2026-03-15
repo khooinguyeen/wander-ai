@@ -1,7 +1,7 @@
-import { google } from "@ai-sdk/google";
 import { convertToModelMessages, stepCountIs, streamText, tool, type UIMessage } from "ai";
 import { z } from "zod";
 
+import { getModel } from "@/lib/ai-model";
 import { buildItinerary } from "@/lib/plan";
 import type { TravelMode, UserPreferences } from "@/lib/types";
 
@@ -58,10 +58,8 @@ If the user volunteers any of this info unprompted, capture it.
 export async function POST(req: Request) {
   const { messages }: { messages: UIMessage[] } = await req.json();
 
-  const model = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite-preview";
-
   const result = streamText({
-    model: google(model),
+    model: getModel(),
     system: SYSTEM_PROMPT,
     messages: await convertToModelMessages(messages),
     tools: {
