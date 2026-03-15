@@ -21,7 +21,6 @@ import {
   MessageCircle,
   Moon,
   RotateCcw,
-  Route,
   Search,
   ShoppingBag,
   Sun,
