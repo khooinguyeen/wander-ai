@@ -1,71 +1,65 @@
-# Mappy AI MVP
+# Mappy
 
-Quick MVP for a Melbourne discovery app that turns a social-style query into a compact day route for food, lowkey lookouts, and fashion spots.
+Melbourne discovery app — chat with an AI local guide to find food spots, cafes, bars, attractions and plan your perfect day route.
 
-## Stack
+## Features
 
-- Next.js App Router
-- Vercel AI SDK
-- Gemini via `@ai-sdk/google`
-- Leaflet for the route map
+- **AI Chat** — Conversational planning powered by Claude. Describe your vibe and get personalized recommendations.
+- **Interactive Map** — Google Maps with clustered venue markers, route visualization, and directions.
+- **Route Planner** — Auto-generates a day itinerary with walking/driving/transit options.
+- **Venue Database** — 500+ Melbourne venues sourced from social media and enriched with Google Maps data, stored in ChromaDB.
 
-## Run
+## Tech Stack
 
-1. Install dependencies.
-2. Copy `.env.example` to `.env.local`.
-3. Set `GOOGLE_GENERATIVE_AI_API_KEY`.
-4. Optionally set `GEMINI_MODEL`.
-5. To enable chat location retrieval from Chroma Cloud, also set:
-   - `CHROMA_API_KEY`
-   - `CHROMA_TENANT`
-   - `CHROMA_DATABASE`
-   - Optional: `CHROMA_COLLECTION_NAME` (defaults to `melbourne_locations`)
-   - Optional: `CHROMA_HOST`, `CHROMA_CLOUD_PORT`, `CHROMA_CLOUD_SSL`
-6. Start the app with `npm run dev`.
+- **Frontend:** Next.js 15 (App Router), React 19, Tailwind CSS 4
+- **AI:** Claude via Vercel AI SDK (`@ai-sdk/anthropic`)
+- **Map:** Google Maps (`@vis.gl/react-google-maps`)
+- **Database:** ChromaDB Cloud (vector search for venue retrieval)
+- **Deployment:** Vercel
 
-## Chat modes
+## Getting Started
 
-The planner has two explicit chat modes in the right panel:
+```bash
+npm install
+cp .env.example .env.local
+# Fill in your API keys in .env.local
+npm run dev
+```
 
-- `Route Planning`: Scout gathers route details (vibe, start location, travel mode, stops) and builds a full itinerary.
-- `Recommendations`: Scout asks only for missing filters (area, vibe, budget), then returns top 5 places from Chroma.
+### Environment Variables
 
-If you ask for a full route while in Recommendations mode, Scout asks for confirmation before you switch modes.
+| Variable | Required | Description |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | Yes | Claude API key |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | Yes | Gemini API key (used for enrichment) |
+| `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | Yes | Google Maps browser API key |
+| `CHROMA_API_KEY` | Yes | ChromaDB Cloud API key |
+| `CHROMA_TENANT` | Yes | ChromaDB tenant |
+| `CHROMA_DATABASE` | Yes | ChromaDB database name |
+| `CHROMA_COLLECTION` | Yes | ChromaDB collection name |
+| `GEMINI_MODEL` | No | Override default Gemini model |
 
-## RedNote pipeline
+## Project Structure
 
-1. Copy `data/rednote_seed_urls.example.txt` to `data/rednote_seed_urls.txt`.
-2. Paste RedNote share URLs or share-text blocks into that file.
-3. Run `python3 scripts/rednote_pipeline.py`.
-4. The pipeline writes:
-   `data/rednote_raw_posts_latest.json`
-   `data/rednote_candidate_mentions_latest.json`
-   `data/melbourne-spots.rednote_latest.json`
+```
+app/
+  api/
+    chat/          # AI chat endpoint (Claude + tool use)
+    plan/          # Itinerary generation
+    venues/        # Venue listing from ChromaDB
+    places/        # Google Maps place details & photos
+  page.tsx         # Main app page
+components/
+  planner-shell.tsx  # Main UI shell
+  route-map.tsx      # Google Maps with markers & directions
+lib/
+  plan.ts            # Route planning logic
+  spots.ts           # Venue data layer
+  location-retrieval.ts  # ChromaDB vector search
+scripts/
+  rednote_pipeline.py   # Social media scraping pipeline
+```
 
-To minimize Gemini usage, the scraper defaults to `--extractor auto`, which only calls Gemini for ambiguous notes. You can force zero model usage with:
+## License
 
-`python3 scripts/rednote_pipeline.py --extractor heuristic`
-
-If you already have raw note exports, use:
-
-`python3 scripts/rednote_pipeline.py --input-raw-json path/to/raw.json`
-
-## Model note
-
-The app defaults to `gemini-2.5-flash-lite` because that was the safest officially documented Lite model I could verify while building this. If your account has access to a preview model, set it through `GEMINI_MODEL` instead of hard-coding it in the source.
-
-## Data note
-
-There is no real Melbourne scrape in this repo yet. The current dataset is a hand-curated mock file built from public venue and place pages so the planner UI and route logic can demo against cleaner Melbourne data before the scraper is production-ready.
-
-## Files
-
-- `data/melbourne-spots.sample.json`: seed data in the normalized app format
-- `docs/mock-data-sources.md`: source list for the current researched mock dataset
-- `data/rednote_melbourne_queries.json`: RedNote-first discovery queries
-- `docs/database-format.md`: recommended record shape
-- `docs/rednote-research.md`: what to scrape from RedNote and why
-- `docs/scraping-plan.md`: practical plan to build the dataset
-- `app/api/plan/route.ts`: itinerary endpoint
-- `components/planner-shell.tsx`: main planner UI
-- `scripts/rednote_pipeline.py`: RedNote URL -> raw posts -> normalized spots pipeline
+Private
