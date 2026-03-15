@@ -2,6 +2,8 @@ import { anthropic } from "@ai-sdk/anthropic";
 import { generateText } from "ai";
 import { z } from "zod";
 
+import { getModel } from "@/lib/ai-model";
+import { chromaSearch, chromaSearchByPreferences } from "@/lib/chroma-search";
 import { getDirections } from "@/lib/directions";
 import { buildGoogleMapsUrl } from "@/lib/routing";
 import { getAllSpots, searchSpots, summarizeAreas } from "@/lib/spots";
@@ -9,11 +11,22 @@ import type { ItineraryResponse, PlannedStop, Spot, TravelMode } from "@/lib/typ
 
 /* ── schemas ────────────────────────────────────────────────── */
 
+const userPreferencesSchema = z.object({
+  budget: z.enum(["low", "medium", "high"]).optional(),
+  dietaryNeeds: z.string().optional(),
+  interests: z.array(z.string()).optional(),
+  avoidCategories: z.array(z.string()).optional(),
+  timeOfDay: z.enum(["morning", "afternoon", "evening", "full-day"]).optional(),
+  vibe: z.string().optional(),
+  groupType: z.string().optional(),
+}).optional();
+
 const planRequestSchema = z.object({
   query: z.string().trim().min(3).max(280),
   startLocation: z.string().trim().max(120).optional().default(""),
   travelMode: z.enum(["walking", "driving", "transit"]).default("driving"),
   maxStops: z.number().int().min(2).max(6).default(4),
+  userPreferences: userPreferencesSchema,
 });
 
 type PlanRequest = z.infer<typeof planRequestSchema>;

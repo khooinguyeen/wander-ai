@@ -2,6 +2,7 @@ import { anthropic } from "@ai-sdk/anthropic";
 import { convertToModelMessages, stepCountIs, streamText, tool, type UIMessage } from "ai";
 import { z } from "zod";
 
+import { getModel } from "@/lib/ai-model";
 import { buildItinerary } from "@/lib/plan";
 import { retrieveLocations } from "@/lib/location-retrieval";
 import type { RecommendationPreferences, TravelMode } from "@/lib/types";
@@ -41,6 +42,16 @@ Your job is to collect sharp preferences, then build a personalized route.
   - stopCount: "How many stops do you want?"
   - cuisineOrSubtype: "Which cuisine are you craving?"
   - dietary: "Any dietary needs?"
+
+## Optional personalisation (ask naturally if the conversation flows there)
+- **Budget** — budget-friendly, mid-range, or splurge?
+- **Dietary needs** — vegetarian, halal, gluten-free, etc.
+- **Group type** — solo, couple, friends, family?
+- **Specific interests** — street art, vintage shopping, specialty coffee, etc.
+- **Time of day** — morning, afternoon, evening, or full day?
+
+Only ask 1-2 of these extras MAX and only if it feels natural. Don't interrogate the user.
+If the user volunteers any of this info unprompted, capture it.
 
 ## When to call buildRoute
 - Once you have enough to personalize: activity intent, start location, and at least a rough budget, CALL buildRoute IMMEDIATELY in this same response — DO NOT write any summary text first.
@@ -243,7 +254,7 @@ export async function POST(req: Request) {
     tools: {
       buildRoute: tool({
         description:
-          "Build a Melbourne day route once you have the vibe/query, start location, travel mode, and number of stops.",
+          "Build a Melbourne day route / tour once you have the vibe/query, start location, travel mode, number of stops, and optionally user preferences for personalisation.",
         inputSchema: z.object({
           query: z
             .string()
