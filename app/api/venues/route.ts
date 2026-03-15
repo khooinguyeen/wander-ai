@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
-import { VENUES } from "@/lib/spots";
+import { getVenues } from "@/lib/spots";
 
 export const runtime = "nodejs";
 
 export async function GET() {
-  return NextResponse.json(VENUES, {
+  const venues = await getVenues();
+  return NextResponse.json(venues, {
     headers: {
-      "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
+      "Cache-Control": "no-cache",
     },
   });
 }

@@ -1,14 +1,14 @@
-import rawVenues from "@/melbourne_videos_locations.json";
+import { getChromaClient, COLLECTION_NAME } from "@/lib/chroma";
 import type { SearchResult, Spot, SpotKind, Venue, VenueCategory, VenueRaw } from "@/lib/types";
 
 /* ── Normalise raw Google Places category string into a UI category ── */
 export function normaliseCategory(raw: string): VenueCategory {
   const r = raw.toLowerCase();
   if (r.includes("restaurant") || r.includes("bakery") || r.includes("market") || (r.includes("food") && !r.includes("shopping"))) return "restaurant";
-  if (r === "coffee") return "cafe";
+  if (r === "coffee" || r === "cafe" || r.includes("cafe")) return "cafe";
   if (r === "bar") return "bar";
   if (r.includes("clothing") || r.includes("shopping") || r.includes("beauty") || r.includes("home_goods")) return "shopping";
-  if (r.includes("attraction") || r.includes("route") || r.includes("natural_feature") || r.includes("stadium") || r.includes("lodging") || r.includes("train_station")) return "attraction";
+  if (r.includes("attraction") || r.includes("activity") || r.includes("entertainment") || r.includes("route") || r.includes("natural_feature") || r.includes("stadium") || r.includes("lodging") || r.includes("train_station")) return "attraction";
   return "other";
 }
 
@@ -28,8 +28,103 @@ export function hydrateVenues(raw: VenueRaw[]): Venue[] {
   return Array.from(seen.values());
 }
 
-/** Server-side only — used by API routes and the AI planner. NOT imported by client code. */
-export const VENUES: Venue[] = hydrateVenues(rawVenues as VenueRaw[]);
+/* ── ChromaDB venue loading with in-memory cache ── */
+
+let _cachedVenues: Venue[] | null = null;
+let _cacheTimestamp = 0;
+const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+/** Fetch all venues from ChromaDB and reconstruct VenueRaw objects.
+ *  Paginates with offset/limit to work within ChromaDB cloud quota (max 300 per get). */
+async function fetchVenuesFromChroma(): Promise<VenueRaw[]> {
+  const client = getChromaClient();
+  const collection = await client.getCollection({ name: COLLECTION_NAME });
+
+  const PAGE_SIZE = 300;
+  const total = await collection.count();
+  const allIds: string[] = [];
+  const allMetadatas: Record<string, unknown>[] = [];
+  const allDocuments: (string | null)[] = [];
+
+  for (let offset = 0; offset < total; offset += PAGE_SIZE) {
+    const page = await collection.get({
+      include: ["metadatas", "documents"],
+      limit: PAGE_SIZE,
+      offset,
+    });
+    allIds.push(...page.ids);
+    allMetadatas.push(...(page.metadatas as Record<string, unknown>[]));
+    allDocuments.push(...page.documents);
+  }
+
+  const venues: VenueRaw[] = [];
+
+  for (let i = 0; i < allIds.length; i++) {
+    const meta = (allMetadatas[i] ?? {}) as Record<string, unknown>;
+    const doc = allDocuments[i] ?? "";
+
+    // Extract description: prefer metadata field, otherwise parse from document
+    let description = "";
+    if (meta.description && typeof meta.description === "string") {
+      description = meta.description;
+    } else if (doc) {
+      // Document format: "{name}. {description}. Category: ... Vibe: ... Tags: ... Location: ..."
+      // Try to extract description between first ". " and ". Category:"
+      const catIdx = doc.indexOf(". Category:");
+      if (catIdx > 0) {
+        const afterName = doc.indexOf(". ");
+        if (afterName > 0 && afterName < catIdx) {
+          description = doc.substring(afterName + 2, catIdx);
+        }
+      }
+    }
+
+    venues.push({
+      name: String(meta.name ?? ""),
+      description,
+      category: String(meta.category ?? "other"),
+      suburb: String(meta.suburb ?? "unknown"),
+      city: String(meta.city ?? "Melbourne"),
+      state: String(meta.state ?? "VIC"),
+      country: String(meta.country ?? "Australia"),
+      address: String(meta.address ?? ""),
+      lat: Number(meta.lat ?? 0),
+      lng: Number(meta.lng ?? 0),
+      // ChromaDB ingest uses google_rating_count; app uses review_count
+      review_count: meta.review_count != null
+        ? Number(meta.review_count)
+        : meta.google_rating_count != null && Number(meta.google_rating_count) !== -1
+          ? Number(meta.google_rating_count)
+          : null,
+      price_level: meta.price_level != null && Number(meta.price_level) !== -1
+        ? Number(meta.price_level)
+        : null,
+      vibe: meta.vibe && String(meta.vibe) !== "" ? String(meta.vibe) : null,
+      tags: String(meta.tags ?? "[]"),
+      opening_hours: String(meta.opening_hours ?? "[]"),
+      website: meta.website ? String(meta.website) : null,
+      google_maps_url: meta.google_maps_url ? String(meta.google_maps_url) : null,
+      google_place_id: String(meta.google_place_id ?? allIds[i]),
+      source_urls: String(meta.source_urls ?? "[]"),
+    });
+  }
+
+  return venues;
+}
+
+/** Load venues from ChromaDB (cached for 1 hour) */
+export async function getVenues(): Promise<Venue[]> {
+  const now = Date.now();
+  if (_cachedVenues && now - _cacheTimestamp < CACHE_TTL_MS) {
+    return _cachedVenues;
+  }
+
+  const raw = await fetchVenuesFromChroma();
+  _cachedVenues = hydrateVenues(raw);
+  _cacheTimestamp = now;
+  console.log(`[spots] Loaded ${_cachedVenues.length} venues from ChromaDB`);
+  return _cachedVenues;
+}
 
 /** Convert a Venue into the Spot shape the planner expects */
 function venueToSpot(v: Venue): Spot {
@@ -69,8 +164,6 @@ function venueToSpot(v: Venue): Spot {
     sourcePosts: [],
   };
 }
-
-const spots: Spot[] = VENUES.map(venueToSpot);
 
 const KIND_KEYWORDS: Record<SpotKind, string[]> = {
   food: ["food", "eat", "brunch", "coffee", "cafe", "dinner", "lunch", "dessert", "restaurant", "bar"],
@@ -112,8 +205,9 @@ function buildSearchText(spot: Spot) {
   );
 }
 
-export function getAllSpots() {
-  return spots;
+export async function getAllSpots(): Promise<Spot[]> {
+  const venues = await getVenues();
+  return venues.map(venueToSpot);
 }
 
 export function inferDesiredKinds(query: string) {
@@ -188,12 +282,13 @@ function scoreSpotAgainstQuery(spot: Spot, query: string, startLocation?: string
   };
 }
 
-export function searchSpots(input: {
+export async function searchSpots(input: {
   query: string;
   startLocation?: string;
   maxResults?: number;
-}) {
+}): Promise<SearchResult[]> {
   const maxResults = input.maxResults ?? 10;
+  const spots = await getAllSpots();
 
   return spots
     .map((spot) => {

@@ -59,7 +59,7 @@ const PLANNER_SYSTEM = `You are a Melbourne route planner agent. Your job is to 
 /* ── build itinerary using Gemini agent ─────────────────────── */
 
 export async function buildItinerary(request: PlanRequest): Promise<ItineraryResponse> {
-  const allSpots = getAllSpots();
+  const allSpots = await getAllSpots();
   const spotsById = new Map(allSpots.map((s) => [s.id, s]));
 
   // Collect directions data as the agent calls getDirections
@@ -93,7 +93,7 @@ export async function buildItinerary(request: PlanRequest): Promise<ItineraryRes
           if (args.area) fullQuery += ` ${args.area}`;
           if (args.kind) fullQuery += ` ${args.kind}`;
 
-          const results = searchSpots({
+          const results = await searchSpots({
             query: fullQuery,
             startLocation: args.area,
             maxResults: args.maxResults ?? 8,
@@ -162,12 +162,12 @@ export async function buildItinerary(request: PlanRequest): Promise<ItineraryRes
 
 /* ── assemble the final ItineraryResponse ───────────────────── */
 
-function assemblePlan(
+async function assemblePlan(
   plan: z.infer<typeof itineraryOutputSchema>,
   request: PlanRequest,
   spotsById: Map<string, Spot>,
   directionsCache: Record<string, { distanceKm: number; durationMinutes: number; summary: string }>,
-): ItineraryResponse {
+): Promise<ItineraryResponse> {
   const plannedStops: PlannedStop[] = [];
   let totalDistanceKm = 0;
   let totalTravelMinutes = 0;
@@ -225,7 +225,7 @@ function assemblePlan(
     .filter((s) => !selectedSpots.some((sel) => sel.id === s.id))
     .slice(0, 3);
 
-  const candidates = searchSpots({
+  const candidates = await searchSpots({
     query: request.query,
     startLocation: request.startLocation,
     maxResults: Math.max(request.maxStops * 3, 10),

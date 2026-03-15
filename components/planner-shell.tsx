@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useTheme } from "next-themes";
@@ -21,6 +21,7 @@ import {
   Moon,
   Route,
   Search,
+  ShoppingBag,
   Sun,
   Train,
   UtensilsCrossed,
@@ -78,15 +79,49 @@ const LazyYouTubeEmbed = dynamic(
 
 const HAS_GOOGLE_MAPS = Boolean(process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY);
 
-const CATEGORY_ALL = "all" as const;
-type CategoryFilter = VenueCategory | typeof CATEGORY_ALL;
+/* ── Category filter (multi-select) ───────────────────────── */
+type CategoryValue = VenueCategory;
 
-const CATEGORIES: { value: CategoryFilter; label: string; icon: React.ReactNode }[] = [
-  { value: "all", label: "All", icon: <MapPin className="size-3" /> },
-  { value: "restaurant", label: "Food", icon: <UtensilsCrossed className="size-3" /> },
-  { value: "cafe", label: "Cafes", icon: <Coffee className="size-3" /> },
-  { value: "bar", label: "Bars", icon: <Wine className="size-3" /> },
-  { value: "attraction", label: "Attractions", icon: <MapPin className="size-3" /> },
+const CATEGORIES: { value: CategoryValue; icon: React.ReactNode }[] = [
+  { value: "restaurant", icon: <UtensilsCrossed className="size-3.5" /> },
+  { value: "cafe", icon: <Coffee className="size-3.5" /> },
+  { value: "bar", icon: <Wine className="size-3.5" /> },
+  { value: "attraction", icon: <MapPin className="size-3.5" /> },
+  { value: "shopping", icon: <ShoppingBag className="size-3.5" /> },
+];
+
+/* ── Social media platform filter (multi-select) ─────────── */
+type Platform = "youtube" | "instagram" | "tiktok" | "facebook";
+
+function venuePlatforms(venue: Venue): Platform[] {
+  try {
+    const urls: string[] = JSON.parse(venue.source_urls);
+    const platforms = new Set<Platform>();
+    for (const url of urls) {
+      if (url.includes("youtube")) platforms.add("youtube");
+      else if (url.includes("instagram")) platforms.add("instagram");
+      else if (url.includes("tiktok")) platforms.add("tiktok");
+      else if (url.includes("facebook")) platforms.add("facebook");
+    }
+    return Array.from(platforms);
+  } catch {
+    return [];
+  }
+}
+
+/* Platform SVG icons (inline, 14×14) */
+const PLATFORM_ICONS: Record<Platform, React.ReactNode> = {
+  youtube: <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.5 12 3.5 12 3.5s-7.5 0-9.4.6A3 3 0 0 0 .5 6.2 31.4 31.4 0 0 0 0 12a31.4 31.4 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.6 9.4.6 9.4.6s7.5 0 9.4-.6a3 3 0 0 0 2.1-2.1A31.4 31.4 0 0 0 24 12a31.4 31.4 0 0 0-.5-5.8ZM9.8 15.5V8.5l6.2 3.5-6.2 3.5Z"/></svg>,
+  instagram: <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="20" x="2" y="2" rx="5"/><circle cx="12" cy="12" r="5"/><circle cx="17.5" cy="6.5" r="1.5" fill="currentColor" stroke="none"/></svg>,
+  tiktok: <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19.3 6.4a4.8 4.8 0 0 1-3-1.3 4.8 4.8 0 0 1-1.2-2.6h-3.5v13a2.9 2.9 0 0 1-2.9 2.7 2.9 2.9 0 0 1-2.9-2.9 2.9 2.9 0 0 1 2.9-2.9c.3 0 .6 0 .9.1V9a6.4 6.4 0 0 0-.9-.1 6.4 6.4 0 0 0-6.4 6.4 6.4 6.4 0 0 0 6.4 6.4 6.4 6.4 0 0 0 6.4-6.4V9.3a8.2 8.2 0 0 0 4.7 1.5V7.3a4.8 4.8 0 0 1-1.5-.9Z"/></svg>,
+  facebook: <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3V2Z"/></svg>,
+};
+
+const PLATFORMS: { value: Platform; icon: React.ReactNode }[] = [
+  { value: "youtube", icon: PLATFORM_ICONS.youtube },
+  { value: "instagram", icon: PLATFORM_ICONS.instagram },
+  { value: "tiktok", icon: PLATFORM_ICONS.tiktok },
+  { value: "facebook", icon: PLATFORM_ICONS.facebook },
 ];
 
 const SUGGESTIONS = [
@@ -617,13 +652,17 @@ function VenueDetail({
 
 /* ── Floating pill menu (center) ──────────────────────────── */
 function FloatingPill({
-  activeCategory,
-  onCategoryChange,
+  activeCategories,
+  onToggleCategory,
+  activePlatforms,
+  onTogglePlatform,
   searchQuery,
   onSearchChange,
 }: {
-  activeCategory: CategoryFilter;
-  onCategoryChange: (cat: CategoryFilter) => void;
+  activeCategories: Set<CategoryValue>;
+  onToggleCategory: (cat: CategoryValue) => void;
+  activePlatforms: Set<Platform>;
+  onTogglePlatform: (p: Platform) => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
 }) {
@@ -637,16 +676,35 @@ function FloatingPill({
         <button
           key={cat.value}
           type="button"
-          onClick={() => onCategoryChange(cat.value)}
+          onClick={() => onToggleCategory(cat.value)}
           className={cn(
-            "flex items-center gap-1 px-2.5 py-1 rounded-full text-[0.65rem] font-medium transition-all duration-150",
-            activeCategory === cat.value
+            "grid place-items-center size-7 rounded-full transition-all duration-150",
+            activeCategories.has(cat.value)
               ? "bg-secondary text-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
           )}
+          title={cat.value}
         >
           {cat.icon}
-          {cat.label}
+        </button>
+      ))}
+
+      <div className="h-4 w-px bg-border mx-0.5" />
+
+      {PLATFORMS.map((p) => (
+        <button
+          key={p.value}
+          type="button"
+          onClick={() => onTogglePlatform(p.value)}
+          className={cn(
+            "grid place-items-center size-7 rounded-full transition-all duration-150",
+            activePlatforms.has(p.value)
+              ? "bg-secondary text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+          )}
+          title={p.value}
+        >
+          {p.icon}
         </button>
       ))}
 
@@ -764,7 +822,22 @@ export function PlannerShell() {
   const [welcomeMsg] = useState(getRandomWelcome);
   const [placeholder] = useState(() => PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)]);
   const [input, setInput] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
+  const [activeCategories, setActiveCategories] = useState<Set<CategoryValue>>(new Set());
+  const [activePlatforms, setActivePlatforms] = useState<Set<Platform>>(new Set());
+  const toggleCategory = useCallback((cat: CategoryValue) => {
+    setActiveCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat); else next.add(cat);
+      return next;
+    });
+  }, []);
+  const togglePlatform = useCallback((p: Platform) => {
+    setActivePlatforms((prev) => {
+      const next = new Set(prev);
+      if (next.has(p)) next.delete(p); else next.add(p);
+      return next;
+    });
+  }, []);
   const [venueSearch, setVenueSearch] = useState("");
   const [selectedVenueId, setSelectedVenueId] = useState<string | null>(null);
   const [leftOpen, setLeftOpen] = useState(false);
@@ -779,8 +852,11 @@ export function PlannerShell() {
   useEffect(() => {
     fetch("/api/venues")
       .then((r) => r.json())
-      .then((data: Venue[]) => setVenues(data))
-      .catch(() => {});
+      .then((data: Venue[]) => {
+        console.log("[planner-shell] venues fetched:", data.length);
+        setVenues(data);
+      })
+      .catch((err) => console.error("[planner-shell] venues fetch error:", err));
   }, []);
 
   useEffect(() => {
@@ -817,7 +893,8 @@ export function PlannerShell() {
 
   const filteredVenues = useMemo(() => {
     let result = venues;
-    if (categoryFilter !== "all") result = result.filter((v) => v.uiCategory === categoryFilter);
+    if (activeCategories.size > 0) result = result.filter((v) => activeCategories.has(v.uiCategory));
+    if (activePlatforms.size > 0) result = result.filter((v) => venuePlatforms(v).some((p) => activePlatforms.has(p)));
     if (venueSearch.trim()) {
       const q = venueSearch.toLowerCase();
       result = result.filter((v) =>
@@ -829,7 +906,7 @@ export function PlannerShell() {
       );
     }
     return result;
-  }, [categoryFilter, venueSearch, venues]);
+  }, [activeCategories, activePlatforms, venueSearch, venues]);
 
   // v5 useChat — transport-based, sendMessage API
   const { messages, sendMessage, status } = useChat({
@@ -1009,8 +1086,10 @@ export function PlannerShell() {
       {/* floating pill menu */}
       <div className={introPhase === "welcome" || introPhase === "windy" || introPhase === "map" ? "hidden" : ""}>
         <FloatingPill
-          activeCategory={categoryFilter}
-          onCategoryChange={setCategoryFilter}
+          activeCategories={activeCategories}
+          onToggleCategory={toggleCategory}
+          activePlatforms={activePlatforms}
+          onTogglePlatform={togglePlatform}
           searchQuery={venueSearch}
           onSearchChange={setVenueSearch}
         />
@@ -1200,7 +1279,7 @@ export function PlannerShell() {
 
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-semibold">
-                    {categoryFilter === "all" ? "All places" : CATEGORIES.find(c => c.value === categoryFilter)?.label}
+                    {activeCategories.size === 0 ? "All places" : [...activeCategories].join(", ")}
                   </h3>
                   <span className="text-xs text-muted-foreground">
                     {filteredVenues.length} spots

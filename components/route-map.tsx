@@ -9,6 +9,7 @@ import {
   useMapsLibrary
 } from "@vis.gl/react-google-maps";
 
+import { MarkerClusterer } from "@googlemaps/markerclusterer";
 import type { PlannedStop, Spot, TravelMode, Venue } from "@/lib/types";
 
 const MELBOURNE_CENTER = { lat: -37.8136, lng: 144.9631 };
@@ -303,6 +304,52 @@ function DirectionsToSelected({
   return null;
 }
 
+const MELBOURNE_BOUNDS = {
+  north: -36.0,
+  south: -39.5,
+  east: 147.0,
+  west: 143.5,
+};
+const MIN_ZOOM = 5;
+
+function BoundsGuard({ onWarning }: { onWarning: (msg: string | null) => void }) {
+  const map = useMap();
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!map) return;
+
+    // Lock zoom and pan to Melbourne
+    map.setOptions({
+      minZoom: MIN_ZOOM,
+      restriction: {
+        latLngBounds: MELBOURNE_BOUNDS,
+        strictBounds: true,
+      },
+    });
+
+    let prevZoom = map.getZoom() ?? 13;
+
+    const listener = map.addListener("zoom_changed", () => {
+      const zoom = map.getZoom() ?? 13;
+      // Only warn when trying to zoom out and hitting the limit
+      if (zoom <= MIN_ZOOM && zoom < prevZoom) {
+        onWarning("We only cover Melbourne for now");
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
+        timeoutRef.current = setTimeout(() => onWarning(null), 2500);
+      }
+      prevZoom = zoom;
+    });
+
+    return () => {
+      google.maps.event.removeListener(listener);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, [map, onWarning]);
+
+  return null;
+}
+
 const VENUE_CATEGORY_ICON: Record<string, ReactNode> = {
   restaurant: <UtensilsCrossed size={14} strokeWidth={2.5} color="#fff" />,
   cafe: <Coffee size={14} strokeWidth={2.5} color="#fff" />,
@@ -312,6 +359,121 @@ const VENUE_CATEGORY_ICON: Record<string, ReactNode> = {
   other: <MapPin size={14} strokeWidth={2.5} color="#fff" />,
 };
 
+/* Inline SVG icons for imperative (non-React) marker creation */
+const VENUE_CATEGORY_SVG: Record<string, string> = {
+  restaurant: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m16 2-2.3 2.3a3 3 0 0 0 0 4.2l1.8 1.8a3 3 0 0 0 4.2 0L22 8"/><path d="M15 15 3.3 3.3a4.2 4.2 0 0 0 0 6l7.3 7.3c1.7 1.7 4.3 1.7 6 0"/><path d="m2 22 5.5-5.5"/></svg>`,
+  cafe: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2v2"/><path d="M14 2v2"/><path d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a2 2 0 1 1 0 4h-2"/><path d="M6 2v2"/></svg>`,
+  bar: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 22h8"/><path d="M7 10h10"/><path d="M12 15v7"/><path d="m19 2-7 8-7-8Z"/></svg>`,
+  attraction: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></svg>`,
+  shopping: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></svg>`,
+  other: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></svg>`,
+};
+
+
+/** Clustered venue markers — groups nearby venues at low zoom, expands on zoom in */
+function ClusteredVenueMarkers({
+  venues,
+  selectedVenueId,
+  onSelectVenue,
+}: {
+  venues: Venue[];
+  selectedVenueId: string | null;
+  onSelectVenue: (id: string) => void;
+}) {
+  const map = useMap();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const markersRef = useRef<any[]>([]);
+  const clustererRef = useRef<MarkerClusterer | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const venueIdMapRef = useRef<globalThis.Map<any, string>>(new globalThis.Map());
+
+  // Create / update markers & clusterer when venues change
+  useEffect(() => {
+    if (!map) return;
+
+    // Clean up old
+    if (clustererRef.current) {
+      clustererRef.current.clearMarkers();
+    }
+    markersRef.current = [];
+    venueIdMapRef.current.clear();
+
+    const markers = venues.map((venue) => {
+      const color = VENUE_CATEGORY_COLORS[venue.uiCategory] ?? "#3b82f6";
+      const svg = VENUE_CATEGORY_SVG[venue.uiCategory] ?? VENUE_CATEGORY_SVG.other;
+      const el = document.createElement("div");
+      el.className = "pill-marker pill-marker--venue";
+      el.innerHTML = `<span class="pill-marker__icon" style="background:${color}">${svg}</span>`;
+
+      const marker = new google.maps.marker.AdvancedMarkerElement({
+        position: { lat: venue.lat, lng: venue.lng },
+        map, // needed for clusterer to pick it up
+        title: venue.name,
+        content: el,
+        zIndex: 10,
+      });
+
+      marker.addListener("click", () => onSelectVenue(venue.id));
+      venueIdMapRef.current.set(marker, venue.id);
+      return marker;
+    });
+
+    markersRef.current = markers;
+
+    const clusterer = new MarkerClusterer({
+      map,
+      markers,
+      renderer: {
+        render({ count, position }) {
+          const el = document.createElement("div");
+          el.className = "cluster-marker";
+          el.textContent = String(count);
+          return new google.maps.marker.AdvancedMarkerElement({
+            position,
+            content: el,
+            zIndex: 50,
+          });
+        },
+      },
+    });
+    clustererRef.current = clusterer;
+
+    return () => {
+      clusterer.clearMarkers();
+      for (const m of markers) {
+        m.map = null;
+      }
+    };
+  }, [map, venues, onSelectVenue]);
+
+  // Highlight selected marker
+  useEffect(() => {
+    for (const marker of markersRef.current) {
+      const vid = venueIdMapRef.current.get(marker);
+      const el = marker.content as HTMLElement | null;
+      if (!el) continue;
+      if (vid === selectedVenueId) {
+        el.classList.add("pill-marker--expanded");
+        const venue = venues.find((v) => v.id === vid);
+        // Add label if not already there
+        if (venue && !el.querySelector(".pill-marker__label")) {
+          const label = document.createElement("span");
+          label.className = "pill-marker__label";
+          label.textContent = venue.name;
+          el.appendChild(label);
+        }
+        marker.zIndex = 100;
+      } else {
+        el.classList.remove("pill-marker--expanded");
+        const label = el.querySelector(".pill-marker__label");
+        if (label) label.remove();
+        marker.zIndex = 10;
+      }
+    }
+  }, [selectedVenueId, venues]);
+
+  return null;
+}
 
 function GoogleMapInner({
   stops,
@@ -328,6 +490,8 @@ function GoogleMapInner({
   const hasVenues = venues.length > 0;
   const [showDirections, setShowDirections] = useState(false);
   const [routeInfo, setRouteInfo] = useState<AllRouteInfo | null>(null);
+  const [boundsWarning, setBoundsWarning] = useState<string | null>(null);
+  const handleBoundsWarning = useCallback((msg: string | null) => setBoundsWarning(msg), []);
 
   // Selected venue/stop name
   const selectedEntity = useMemo(() => {
@@ -396,6 +560,7 @@ function GoogleMapInner({
       fullscreenControl={false}
       style={{ width: "100%", height: "100%" }}
     >
+      <BoundsGuard onWarning={handleBoundsWarning} />
       <FitBounds stops={stops} previewSpots={previewSpots} venues={venues} />
 
       {/* Current location marker */}
@@ -437,30 +602,11 @@ function GoogleMapInner({
             </AdvancedMarker>
           ))
         : hasVenues
-          ? venues.map((venue) => {
-              const isSelected = selectedVenueId === venue.id;
-              const color = VENUE_CATEGORY_COLORS[venue.uiCategory] ?? "#3b82f6";
-              const icon = VENUE_CATEGORY_ICON[venue.uiCategory] ?? <MapPin size={14} strokeWidth={2.5} color="#fff" />;
-              return (
-                <AdvancedMarker
-                  key={venue.id}
-                  position={{ lat: venue.lat, lng: venue.lng }}
-                  title={venue.name}
-                  onClick={() => onSelectVenue(venue.id)}
-                  zIndex={isSelected ? 100 : 10}
-                  style={{ overflow: "visible" }}
-                >
-                  <div className={`pill-marker pill-marker--venue ${isSelected ? "pill-marker--expanded" : ""}`}>
-                    <span className="pill-marker__icon" style={{ background: color }}>
-                      {icon}
-                    </span>
-                    {isSelected && (
-                      <span className="pill-marker__label">{venue.name}</span>
-                    )}
-                  </div>
-                </AdvancedMarker>
-              );
-            })
+          ? <ClusteredVenueMarkers
+              venues={venues}
+              selectedVenueId={selectedVenueId}
+              onSelectVenue={onSelectVenue}
+            />
           : previewSpots.slice(0, 20).map((spot) => (
               <AdvancedMarker
                 key={spot.id}
@@ -470,6 +616,13 @@ function GoogleMapInner({
               </AdvancedMarker>
             ))}
     </Map>
+
+    {/* Bounds warning */}
+    {boundsWarning && (
+      <div className="bounds-warning">
+        {boundsWarning}
+      </div>
+    )}
 
     {/* Bottom info panel — shows when a location is selected */}
     {selectedDestination && selectedEntity && (
