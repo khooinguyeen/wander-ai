@@ -2,6 +2,7 @@ import { google } from "@ai-sdk/google";
 import { generateText, stepCountIs, tool } from "ai";
 import { z } from "zod";
 
+import { chromaSearch, chromaSearchByPreferences } from "@/lib/chroma-search";
 import { getDirections } from "@/lib/directions";
 import { buildGoogleMapsUrl } from "@/lib/routing";
 import { getAllSpots, searchSpots, summarizeAreas } from "@/lib/spots";
@@ -9,11 +10,22 @@ import type { ItineraryResponse, PlannedStop, Spot, TravelMode } from "@/lib/typ
 
 /* ── schemas ────────────────────────────────────────────────── */
 
+const userPreferencesSchema = z.object({
+  budget: z.enum(["low", "medium", "high"]).optional(),
+  dietaryNeeds: z.string().optional(),
+  interests: z.array(z.string()).optional(),
+  avoidCategories: z.array(z.string()).optional(),
+  timeOfDay: z.enum(["morning", "afternoon", "evening", "full-day"]).optional(),
+  vibe: z.string().optional(),
+  groupType: z.string().optional(),
+}).optional();
+
 const planRequestSchema = z.object({
   query: z.string().trim().min(3).max(280),
   startLocation: z.string().trim().max(120).optional().default(""),
   travelMode: z.enum(["walking", "driving", "transit"]).default("driving"),
   maxStops: z.number().int().min(2).max(6).default(4),
+  userPreferences: userPreferencesSchema,
 });
 
 type PlanRequest = z.infer<typeof planRequestSchema>;
@@ -33,120 +45,195 @@ const itineraryOutputSchema = z.object({
 
 /* ── planner system prompt ──────────────────────────────────── */
 
-const PLANNER_SYSTEM = `You are a Melbourne route planner agent. Your job is to build the best possible day route from a database of curated Melbourne spots.
+function buildPlannerSystem(hasPreferences: boolean): string {
+  const base = `You are a Melbourne route planner agent. Your job is to build the best possible day route from a database of curated Melbourne spots.
 
 ## Your process
-1. First, call searchSpots to find candidates matching the user's vibe.
+1. First, search for candidates matching the user's vibe.${hasPreferences ? `
+   - Use searchByPreferences FIRST — it uses the user's collected preferences (budget, dietary needs, interests, group type) for personalised semantic search.
+   - Then use searchSpots for additional candidates or to fill specific gaps (e.g. you need a lookout but preferences returned mostly food).` : `
+   - Use searchSpots to find candidates matching the user's vibe.`}
 2. Review the results. Think about what mix of spots makes a great day.
 3. Call getDirections between your planned stops to check real travel times.
 4. If a leg is too long (>30 min walking, >20 min driving), consider reordering or swapping a spot.
 5. Once you're happy with the plan, call finalizePlan with your final selection.
 
-## Planning rules
+## Tour planning rules
+- Build a COHESIVE tour — stops should flow naturally into each other (e.g. coffee → walk → brunch → shopping → lookout).
 - Keep the route geographically compact — don't zigzag across the city.
 - Respect visit windows — don't schedule a brunch spot at 5 PM.
 - Mix up stop kinds when the user's vibe calls for variety.
+- Consider the GROUP TYPE when selecting spots — a couple's date differs from a family outing.
 - If the user says "lowkey" or "hidden", favor spots with high hiddenGem signals.
 - If they want "viral" or "trending", favor high viral signals.
 - Infer a sensible start time: brunch/coffee → 9:30 AM, lunch → 11:30 AM, dinner/date → 5:30 PM, sunset → 3:30 PM.
 - Each stop's duration should use the spot's idealVisitMinutes.
+- For BUDGET constraints: "$" = budget-friendly, "$$" = mid-range, "$$$" = premium.
+- For DIETARY constraints: prioritize food spots that match (e.g. vegetarian, halal, gluten-free).
 
 ## Important
-- You can call searchSpots multiple times with different queries to find the right mix.
+- You can call search tools multiple times with different queries to find the right mix.
 - You MUST call getDirections at least once to validate travel times between consecutive stops.
 - You MUST call finalizePlan exactly once at the end with your final plan.`;
+
+  return base;
+}
+
+/* ── check if ChromaDB is configured ─────────────────────────── */
+
+function isChromaConfigured(): boolean {
+  return Boolean(
+    process.env.CHROMA_API_KEY &&
+    process.env.CHROMA_TENANT &&
+    process.env.CHROMA_DATABASE,
+  );
+}
 
 /* ── build itinerary using Gemini agent ─────────────────────── */
 
 export async function buildItinerary(request: PlanRequest): Promise<ItineraryResponse> {
   const allSpots = getAllSpots();
   const spotsById = new Map(allSpots.map((s) => [s.id, s]));
+  const useChroma = isChromaConfigured();
+  const hasPreferences = Boolean(request.userPreferences);
 
   // Collect directions data as the agent calls getDirections
   const directionsCache: Record<string, { distanceKm: number; durationMinutes: number; summary: string }> = {};
 
+  // Collect ChromaDB spots so assemblePlan can resolve IDs from both sources
+  const chromaSpotsById = new Map<string, Spot>();
+
   const model = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite-preview";
+
+  // Helper to format a spot for the agent response
+  function formatSpotForAgent(s: Spot & { matchScore: number }) {
+    return {
+      id: s.id, name: s.name, kind: s.kind, area: s.area, suburb: s.suburb,
+      address: s.address, categories: s.categories, vibeTags: s.vibeTags,
+      description: s.description, priceBand: s.priceBand,
+      idealVisitMinutes: s.idealVisitMinutes, visitWindows: s.visitWindows,
+      signals: s.signals,
+      socialProof: { mentions: s.socialProof.mentions, creatorCount: s.socialProof.creatorCount },
+      matchScore: s.matchScore,
+    };
+  }
+
+  // Core tools — always available
+  const searchSpotsTool = tool({
+    description: "Search the Melbourne spots database by keyword. Returns spots ranked by relevance to the query. You can filter by kind (food/lookout/fashion) and area.",
+    inputSchema: z.object({
+      query: z.string().describe("Search query — vibe, cuisine, activity, etc."),
+      area: z.string().optional().describe("Optional area filter like 'Fitzroy', 'CBD', 'South Melbourne'"),
+      kind: z.enum(["food", "lookout", "fashion"]).optional().describe("Optional kind filter"),
+      maxResults: z.number().optional().default(8).describe("Max results to return"),
+    }),
+    execute: async (args) => {
+      let fullQuery = args.query;
+      if (args.area) fullQuery += ` ${args.area}`;
+      if (args.kind) fullQuery += ` ${args.kind}`;
+
+      // Try ChromaDB first for semantic search, fall back to in-memory
+      let results: (Spot & { matchScore: number })[];
+
+      if (useChroma) {
+        try {
+          results = await chromaSearch({
+            query: fullQuery,
+            area: args.area,
+            maxResults: args.maxResults ?? 8,
+          });
+          for (const s of results) chromaSpotsById.set(s.id, s);
+        } catch {
+          results = searchSpots({
+            query: fullQuery,
+            startLocation: args.area,
+            maxResults: args.maxResults ?? 8,
+          });
+        }
+      } else {
+        results = searchSpots({
+          query: fullQuery,
+          startLocation: args.area,
+          maxResults: args.maxResults ?? 8,
+        });
+      }
+
+      return results.map(formatSpotForAgent);
+    },
+  });
+
+  const getDirectionsTool = tool({
+    description: "Get real walking/driving/transit directions between two addresses using Google Maps. Use this to validate travel times between planned stops.",
+    inputSchema: z.object({
+      originAddress: z.string().describe("Starting address or place name"),
+      destinationAddress: z.string().describe("Destination address or place name"),
+      travelMode: z.enum(["walking", "driving", "transit"]).describe("Travel mode"),
+    }),
+    execute: async (args) => {
+      const result = await getDirections(args);
+      const cacheKey = `${args.originAddress}→${args.destinationAddress}`;
+      directionsCache[cacheKey] = {
+        distanceKm: result.distanceKm,
+        durationMinutes: result.durationMinutes,
+        summary: result.summary,
+      };
+      return result;
+    },
+  });
+
+  const finalizePlanTool = tool({
+    description: "Submit your final route plan. Call this exactly once when you are satisfied with the route.",
+    inputSchema: itineraryOutputSchema,
+    execute: async () => {
+      return { status: "plan_received" };
+    },
+  });
+
+  const searchByPreferencesTool = tool({
+    description:
+      "Search venues using the user's collected preferences (budget, vibe, dietary needs, interests, group type). Uses semantic/vector search for better personalised results. Use this FIRST before searchSpots.",
+    inputSchema: z.object({
+      focusQuery: z.string().optional().describe("Optional extra focus like 'brunch spots' or 'street art' to narrow results"),
+      area: z.string().optional().describe("Optional area filter like 'Fitzroy', 'CBD'"),
+      maxResults: z.number().optional().default(10).describe("Max results to return"),
+    }),
+    execute: async (args) => {
+      const results = await chromaSearchByPreferences({
+        preferences: request.userPreferences ?? {},
+        baseQuery: args.focusQuery ?? request.query,
+        area: args.area,
+        maxResults: args.maxResults ?? 10,
+      });
+      for (const s of results) chromaSpotsById.set(s.id, s);
+      return results.map(formatSpotForAgent);
+    },
+  });
+
+  // Build tools object — conditionally include searchByPreferences
+  const baseTools = {
+    searchSpots: searchSpotsTool,
+    getDirections: getDirectionsTool,
+    finalizePlan: finalizePlanTool,
+  };
+  const tools = useChroma && hasPreferences
+    ? { ...baseTools, searchByPreferences: searchByPreferencesTool }
+    : baseTools;
 
   const { toolResults } = await generateText({
     model: google(model),
-    system: PLANNER_SYSTEM,
+    system: buildPlannerSystem(useChroma && hasPreferences),
     prompt: JSON.stringify({
       userRequest: {
         query: request.query,
         startLocation: request.startLocation || "CBD",
         travelMode: request.travelMode,
         maxStops: request.maxStops,
+        ...(request.userPreferences ? { preferences: request.userPreferences } : {}),
       },
       totalSpotsInDatabase: allSpots.length,
     }),
-    tools: {
-      searchSpots: tool({
-        description: "Search the Melbourne spots database. Returns spots ranked by relevance to the query. You can filter by kind (food/lookout/fashion) and area.",
-        inputSchema: z.object({
-          query: z.string().describe("Search query — vibe, cuisine, activity, etc."),
-          area: z.string().optional().describe("Optional area filter like 'Fitzroy', 'CBD', 'South Melbourne'"),
-          kind: z.enum(["food", "lookout", "fashion"]).optional().describe("Optional kind filter"),
-          maxResults: z.number().optional().default(8).describe("Max results to return"),
-        }),
-        execute: async (args) => {
-          let fullQuery = args.query;
-          if (args.area) fullQuery += ` ${args.area}`;
-          if (args.kind) fullQuery += ` ${args.kind}`;
-
-          const results = searchSpots({
-            query: fullQuery,
-            startLocation: args.area,
-            maxResults: args.maxResults ?? 8,
-          });
-
-          return results.map((s) => ({
-            id: s.id,
-            name: s.name,
-            kind: s.kind,
-            area: s.area,
-            suburb: s.suburb,
-            address: s.address,
-            categories: s.categories,
-            vibeTags: s.vibeTags,
-            description: s.description,
-            priceBand: s.priceBand,
-            idealVisitMinutes: s.idealVisitMinutes,
-            visitWindows: s.visitWindows,
-            signals: s.signals,
-            socialProof: { mentions: s.socialProof.mentions, creatorCount: s.socialProof.creatorCount },
-            matchScore: s.matchScore,
-          }));
-        },
-      }),
-
-      getDirections: tool({
-        description: "Get real walking/driving/transit directions between two addresses using Google Maps. Use this to validate travel times between planned stops.",
-        inputSchema: z.object({
-          originAddress: z.string().describe("Starting address or place name"),
-          destinationAddress: z.string().describe("Destination address or place name"),
-          travelMode: z.enum(["walking", "driving", "transit"]).describe("Travel mode"),
-        }),
-        execute: async (args) => {
-          const result = await getDirections(args);
-          const cacheKey = `${args.originAddress}→${args.destinationAddress}`;
-          directionsCache[cacheKey] = {
-            distanceKm: result.distanceKm,
-            durationMinutes: result.durationMinutes,
-            summary: result.summary,
-          };
-          return result;
-        },
-      }),
-
-      finalizePlan: tool({
-        description: "Submit your final route plan. Call this exactly once when you are satisfied with the route.",
-        inputSchema: itineraryOutputSchema,
-        execute: async () => {
-          return { status: "plan_received" };
-        },
-      }),
-    },
-    stopWhen: stepCountIs(8),
+    tools,
+    stopWhen: stepCountIs(10),
   });
 
   // Extract the finalizePlan call from tool results
@@ -157,7 +244,11 @@ export async function buildItinerary(request: PlanRequest): Promise<ItineraryRes
   }
 
   const plan = finalizeCall.input as z.infer<typeof itineraryOutputSchema>;
-  return assemblePlan(plan, request, spotsById, directionsCache);
+
+  // Merge ChromaDB spots into the lookup map so assemblePlan can resolve all IDs
+  const mergedSpotsById = new Map([...spotsById, ...chromaSpotsById]);
+
+  return assemblePlan(plan, request, mergedSpotsById, directionsCache);
 }
 
 /* ── assemble the final ItineraryResponse ───────────────────── */

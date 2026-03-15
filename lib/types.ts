@@ -77,6 +77,16 @@ export type Spot = {
   sourcePosts: SourcePost[];
 };
 
+export type UserPreferences = {
+  budget?: "low" | "medium" | "high";
+  dietaryNeeds?: string;
+  interests?: string[];
+  avoidCategories?: string[];
+  timeOfDay?: "morning" | "afternoon" | "evening" | "full-day";
+  vibe?: string;
+  groupType?: string; // e.g. "couple", "friends", "family", "solo"
+};
+
 export type SearchResult = Spot & {
   matchScore: number;
   matchReason: string;

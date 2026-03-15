@@ -3,13 +3,13 @@ import { convertToModelMessages, stepCountIs, streamText, tool, type UIMessage }
 import { z } from "zod";
 
 import { buildItinerary } from "@/lib/plan";
-import type { TravelMode } from "@/lib/types";
+import type { TravelMode, UserPreferences } from "@/lib/types";
 
 export const maxDuration = 60;
 
 const SYSTEM_PROMPT = `You are Scout, a Melbourne route-planning copilot.
 
-Your job is to collect enough info from the user to plan a great day route, then call the buildRoute tool.
+Your job is to collect enough info from the user to plan a great personalised day route (tour), then call the buildRoute tool.
 
 ## Conversation rules
 - Ask ONE question at a time. Keep messages short (1-2 sentences max).
@@ -23,15 +23,26 @@ Your job is to collect enough info from the user to plan a great day route, then
 3. **Travel mode** — walking, driving, or transit?
 4. **Number of stops** — how many stops? (suggest 3-5 unless they have a preference)
 
+## Optional personalisation (ask naturally if the conversation flows there)
+- **Budget** — budget-friendly, mid-range, or splurge?
+- **Dietary needs** — vegetarian, halal, gluten-free, etc.
+- **Group type** — solo, couple, friends, family?
+- **Specific interests** — street art, vintage shopping, specialty coffee, etc.
+- **Time of day** — morning, afternoon, evening, or full day?
+
+Only ask 1-2 of these extras MAX and only if it feels natural. Don't interrogate the user.
+If the user volunteers any of this info unprompted, capture it.
+
 ## When to call buildRoute
-- Once you have all 4 pieces of info, call buildRoute immediately.
+- Once you have the vibe + at least one other piece of info, fill in defaults and call buildRoute.
 - Don't ask for confirmation — just build it.
 - If the user gives you multiple pieces of info at once, great — skip ahead.
-- If they say something vague like "surprise me", "you pick", or give partial info, fill in sensible defaults and just build the route:
+- Sensible defaults:
   - Start: "CBD"
   - Mode: "walking"
   - Stops: 4
-- IMPORTANT: Err on the side of building the route sooner. If you have a vibe and at least one other piece of info, fill in defaults for the rest and call buildRoute.
+- IMPORTANT: Err on the side of building the route sooner rather than asking more questions.
+- Pass any collected preferences (budget, dietary, interests, group type) into the userPreferences field.
 
 ## After the route is built
 - The tool will return the full itinerary. Give a brief excited summary (2-3 sentences).
@@ -56,7 +67,7 @@ export async function POST(req: Request) {
     tools: {
       buildRoute: tool({
         description:
-          "Build a Melbourne day route once you have the vibe/query, start location, travel mode, and number of stops.",
+          "Build a Melbourne day route / tour once you have the vibe/query, start location, travel mode, number of stops, and optionally user preferences for personalisation.",
         inputSchema: z.object({
           query: z
             .string()
@@ -74,7 +85,19 @@ export async function POST(req: Request) {
             .int()
             .min(2)
             .max(6)
-            .describe("Number of stops to include in the route")
+            .describe("Number of stops to include in the route"),
+          userPreferences: z
+            .object({
+              budget: z.enum(["low", "medium", "high"]).optional().describe("User's budget level"),
+              dietaryNeeds: z.string().optional().describe("Dietary restrictions like 'vegetarian', 'halal'"),
+              interests: z.array(z.string()).optional().describe("Specific interests like ['street art', 'specialty coffee']"),
+              avoidCategories: z.array(z.string()).optional().describe("Categories to avoid"),
+              timeOfDay: z.enum(["morning", "afternoon", "evening", "full-day"]).optional().describe("Preferred time of day"),
+              vibe: z.string().optional().describe("Overall vibe like 'cozy', 'trendy', 'hidden gem'"),
+              groupType: z.string().optional().describe("Group type like 'couple', 'friends', 'family', 'solo'"),
+            })
+            .optional()
+            .describe("Personalised preferences collected from conversation — include any info the user shared about budget, dietary needs, interests, group type, etc."),
         }),
         execute: async (args) => {
           // Gemini sometimes sends snake_case despite schema — normalize
@@ -84,11 +107,15 @@ export async function POST(req: Request) {
           const travelMode = (raw.travelMode ?? raw.travel_mode ?? "walking") as TravelMode;
           const maxStops = Number(raw.maxStops ?? raw.max_stops ?? raw.number_of_stops ?? 4);
 
+          // Extract user preferences (handle snake_case from Gemini)
+          const rawPrefs = (raw.userPreferences ?? raw.user_preferences ?? undefined) as UserPreferences | undefined;
+
           const itinerary = await buildItinerary({
             query: query || "fun day out in Melbourne",
             startLocation,
             travelMode,
-            maxStops: Math.max(2, Math.min(6, maxStops))
+            maxStops: Math.max(2, Math.min(6, maxStops)),
+            userPreferences: rawPrefs,
           });
           return itinerary;
         }
