@@ -381,6 +381,7 @@ function ClusteredVenueMarkers({
   onSelectVenue: (id: string) => void;
 }) {
   const map = useMap();
+  const markerLib = useMapsLibrary("marker");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const markersRef = useRef<any[]>([]);
   const clustererRef = useRef<MarkerClusterer | null>(null);
@@ -389,7 +390,7 @@ function ClusteredVenueMarkers({
 
   // Create / update markers & clusterer when venues change
   useEffect(() => {
-    if (!map) return;
+    if (!map || !markerLib) return;
 
     // Clean up old
     if (clustererRef.current) {
@@ -405,7 +406,7 @@ function ClusteredVenueMarkers({
       el.className = "pill-marker pill-marker--venue";
       el.innerHTML = `<span class="pill-marker__icon" style="background:${color}">${svg}</span>`;
 
-      const marker = new google.maps.marker.AdvancedMarkerElement({
+      const marker = new markerLib.AdvancedMarkerElement({
         position: { lat: venue.lat, lng: venue.lng },
         map, // needed for clusterer to pick it up
         title: venue.name,
@@ -428,7 +429,7 @@ function ClusteredVenueMarkers({
           const el = document.createElement("div");
           el.className = "cluster-marker";
           el.textContent = String(count);
-          return new google.maps.marker.AdvancedMarkerElement({
+          return new markerLib.AdvancedMarkerElement({
             position,
             content: el,
             zIndex: 50,
@@ -444,7 +445,7 @@ function ClusteredVenueMarkers({
         m.map = null;
       }
     };
-  }, [map, venues, onSelectVenue]);
+  }, [map, markerLib, venues, onSelectVenue]);
 
   // Highlight selected marker
   useEffect(() => {
