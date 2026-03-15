@@ -2,14 +2,16 @@ import { google } from "@ai-sdk/google";
 import { convertToModelMessages, stepCountIs, streamText, tool, type UIMessage } from "ai";
 import { z } from "zod";
 
+import { retrieveLocationsFromChroma } from "@/lib/location-retrieval";
 import { buildItinerary } from "@/lib/plan";
-import type { TravelMode } from "@/lib/types";
+import type { ChatMode, TravelMode } from "@/lib/types";
 
 export const maxDuration = 60;
+export const runtime = "nodejs";
 
-const SYSTEM_PROMPT = `You are Scout, a Melbourne route-planning copilot.
+const ROUTE_SYSTEM_PROMPT = `You are Scout, a Melbourne route-planning copilot.
 
-Your job is to collect enough info from the user to plan a great day route, then call the buildRoute tool.
+Your job in this mode is to build a full day route. Do not stay in recommendations-only mode.
 
 ## Conversation rules
 - Ask ONE question at a time. Keep messages short (1-2 sentences max).
@@ -33,25 +35,115 @@ Your job is to collect enough info from the user to plan a great day route, then
   - Stops: 4
 - IMPORTANT: Err on the side of building the route sooner. If you have a vibe and at least one other piece of info, fill in defaults for the rest and call buildRoute.
 
-## After the route is built
-- The tool will return the full itinerary. Give a brief excited summary (2-3 sentences).
-- Mention the day theme and highlight 1-2 standout stops.
-- Don't list every stop — the workspace panel shows that.
-- If they want to tweak, ask what to change and rebuild.
+## Style
+- Use Australian casual English. "Reckon", "solid pick", "keen?" are fine.
+- No emojis unless the user uses them first.
+- Never say "I'm an AI" or "as a language model".`;
+
+const RECOMMENDATIONS_SYSTEM_PROMPT = `You are Scout, a Melbourne venue recommendation copilot.
+
+Your job in this mode is to narrow down preferences, then recommend the top 5 places.
+
+## Conversation rules
+- Ask ONE question at a time. Keep messages short (1-2 sentences max).
+- Be warm but concise. You're a local friend, not a customer service bot.
+- Don't number your questions.
+
+## Clarifying dimensions
+- Area/suburb (where in Melbourne)
+- Vibe/atmosphere (cozy, lively, romantic, casual, etc.)
+- Budget (cheap, mid-range, premium)
+
+## Flow for recommendations
+- Ask only for missing clarifiers.
+- Once you have intent + enough clarifiers, call retrieveLocations.
+- Return the top 5 results and explain in plain language why they match.
+- If user asks to refine, ask one follow-up and call retrieveLocations again.
+
+## Route intent in recommendations mode
+- If the user asks for a full route/itinerary, ask for confirmation to switch modes first.
+- Do not pretend to switch automatically.
+- Tell them you can switch to Route Planning mode after they confirm.
 
 ## Style
 - Use Australian casual English. "Reckon", "solid pick", "keen?" are fine.
 - No emojis unless the user uses them first.
 - Never say "I'm an AI" or "as a language model".`;
 
+const chatRequestSchema = z.object({
+  messages: z.array(z.custom<UIMessage>()),
+  mode: z.enum(["route-planning", "recommendations"]).optional().default("route-planning"),
+});
+
 export async function POST(req: Request) {
-  const { messages }: { messages: UIMessage[] } = await req.json();
+  const body = await req.json();
+  const parsed = chatRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    return new Response(JSON.stringify({ error: "Invalid chat payload." }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const { messages } = parsed.data as { messages: UIMessage[]; mode: ChatMode };
+  const mode: ChatMode = parsed.data.mode;
 
   const model = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite-preview";
 
+  if (mode === "recommendations") {
+    const result = streamText({
+      model: google(model),
+      system: RECOMMENDATIONS_SYSTEM_PROMPT,
+      messages: await convertToModelMessages(messages),
+      tools: {
+        retrieveLocations: tool({
+          description:
+            "Retrieve matching Melbourne locations from Chroma Cloud using intent + optional clarification.",
+          inputSchema: z.object({
+            intent: z
+              .string()
+              .describe(
+                "Core user request, e.g. 'hidden matcha cafes' or 'romantic rooftop bars'"
+              ),
+            clarification: z
+              .string()
+              .optional()
+              .describe("Optional preferences like suburb, vibe, budget, or constraints"),
+            topK: z
+              .number()
+              .int()
+              .min(1)
+              .max(20)
+              .optional()
+              .describe("How many matches to return"),
+          }),
+          execute: async ({ intent, clarification, topK }) => {
+            try {
+              return await retrieveLocationsFromChroma({
+                intent,
+                clarification,
+                topK: Math.max(1, Math.min(5, topK ?? 5)),
+              });
+            } catch (error) {
+              const message = error instanceof Error ? error.message : "Unable to retrieve recommendations right now.";
+              return {
+                queryText: "",
+                results: [],
+                error: message,
+              };
+            }
+          },
+        }),
+      },
+      stopWhen: stepCountIs(5)
+    });
+
+    return result.toUIMessageStreamResponse();
+  }
+
   const result = streamText({
     model: google(model),
-    system: SYSTEM_PROMPT,
+    system: ROUTE_SYSTEM_PROMPT,
     messages: await convertToModelMessages(messages),
     tools: {
       buildRoute: tool({
@@ -77,7 +169,6 @@ export async function POST(req: Request) {
             .describe("Number of stops to include in the route")
         }),
         execute: async (args) => {
-          // Gemini sometimes sends snake_case despite schema — normalize
           const raw = args as Record<string, unknown>;
           const query = (raw.query ?? raw.vibe ?? raw.trip_brief ?? raw.coffee_lookout ?? "") as string;
           const startLocation = (raw.startLocation ?? raw.start_location ?? "CBD") as string;
@@ -92,7 +183,7 @@ export async function POST(req: Request) {
           });
           return itinerary;
         }
-      })
+      }),
     },
     stopWhen: stepCountIs(3)
   });

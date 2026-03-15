@@ -15,7 +15,22 @@ Quick MVP for a Melbourne discovery app that turns a social-style query into a c
 2. Copy `.env.example` to `.env.local`.
 3. Set `GOOGLE_GENERATIVE_AI_API_KEY`.
 4. Optionally set `GEMINI_MODEL`.
-5. Start the app with `npm run dev`.
+5. To enable chat location retrieval from Chroma Cloud, also set:
+   - `CHROMA_API_KEY`
+   - `CHROMA_TENANT`
+   - `CHROMA_DATABASE`
+   - Optional: `CHROMA_COLLECTION_NAME` (defaults to `melbourne_locations`)
+   - Optional: `CHROMA_HOST`, `CHROMA_CLOUD_PORT`, `CHROMA_CLOUD_SSL`
+6. Start the app with `npm run dev`.
+
+## Chat modes
+
+The planner has two explicit chat modes in the right panel:
+
+- `Route Planning`: Scout gathers route details (vibe, start location, travel mode, stops) and builds a full itinerary.
+- `Recommendations`: Scout asks only for missing filters (area, vibe, budget), then returns top 5 places from Chroma.
+
+If you ask for a full route while in Recommendations mode, Scout asks for confirmation before you switch modes.
 
 ## RedNote pipeline
 
