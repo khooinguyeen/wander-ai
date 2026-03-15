@@ -9,14 +9,16 @@ import type { ItineraryResponse, PlannedStop, Spot, TravelMode } from "@/lib/typ
 
 /* ── schemas ────────────────────────────────────────────────── */
 
-type PlanRequest = {
-  query: string;
-  startLocation?: string;
-  travelMode: "walking" | "driving" | "transit";
-  maxStops: number;
-  venueIds?: string[];
-  venueNames?: string[];
-};
+const planRequestSchema = z.object({
+  query: z.string(),
+  startLocation: z.string().optional(),
+  travelMode: z.enum(["walking", "driving", "transit"]),
+  maxStops: z.number().int().min(2).max(6),
+  venueIds: z.array(z.string()).optional(),
+  venueNames: z.array(z.string()).optional(),
+});
+
+type PlanRequest = z.infer<typeof planRequestSchema>;
 
 const itineraryOutputSchema = z.object({
   dayTheme: z.string().describe("A catchy 3-8 word name for this day plan"),
