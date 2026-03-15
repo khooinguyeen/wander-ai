@@ -424,7 +424,7 @@ function ClusteredVenueMarkers({
       map,
       markers,
       renderer: {
-        render({ count, position }) {
+        render({ count, position }: { count: number; position: google.maps.LatLng }) {
           const el = document.createElement("div");
           el.className = "cluster-marker";
           el.textContent = String(count);
