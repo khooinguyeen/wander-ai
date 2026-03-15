@@ -10,10 +10,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.58",
     "@ai-sdk/google": "^2.0.62",
     "@ai-sdk/provider-utils": "^4.0.19",
     "@ai-sdk/react": "^3.0.118",
-    "@chroma-core/default-embed": "^0.1.9",
     "@googlemaps/markerclusterer": "^2.6.2",
     "@radix-ui/react-scroll-area": "^1.2.10",
     "@radix-ui/react-tabs": "^1.1.13",
@@ -37,6 +37,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-leaflet": "^5.0.0",
+    "react-markdown": "^10.1.0",
     "react-social-media-embed": "^2.5.18",
     "streamdown": "^2.4.0",
     "tailwind-merge": "^3.5.0",

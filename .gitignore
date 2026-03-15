@@ -7,3 +7,5 @@ npm-debug.log*
 data/
 __pycache__/
 tsconfig.tsbuildinfo
+.mcp.json
+.playwright-mcp/

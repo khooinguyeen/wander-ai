@@ -1,5 +1,5 @@
-import { google } from "@ai-sdk/google";
-import { generateText, stepCountIs, tool } from "ai";
+import { anthropic } from "@ai-sdk/anthropic";
+import { generateText } from "ai";
 import { z } from "zod";
 
 import { getDirections } from "@/lib/directions";
@@ -33,37 +33,25 @@ const itineraryOutputSchema = z.object({
 
 /* ── planner system prompt ──────────────────────────────────── */
 
-const PLANNER_SYSTEM = `You are a Melbourne route planner agent. Your job is to build the best possible day route from a database of curated Melbourne spots.
-
-## Your process
-1. First, call searchSpots to find candidates matching the user's vibe.
-2. Review the results. Think about what mix of spots makes a great day.
-3. Call getDirections between your planned stops to check real travel times.
-4. If a leg is too long (>30 min walking, >20 min driving), consider reordering or swapping a spot.
-5. Once you're happy with the plan, call finalizePlan with your final selection.
-
-## Planning rules
-- Keep the route geographically compact — don't zigzag across the city.
-- Respect visit windows — don't schedule a brunch spot at 5 PM.
-- Mix up stop kinds when the user's vibe calls for variety.
-- If the user says "lowkey" or "hidden", favor spots with high hiddenGem signals.
-- If they want "viral" or "trending", favor high viral signals.
-- Infer a sensible start time: brunch/coffee → 9:30 AM, lunch → 11:30 AM, dinner/date → 5:30 PM, sunset → 3:30 PM.
-- Each stop's duration should use the spot's idealVisitMinutes.
-
-## Important
-- You can call searchSpots multiple times with different queries to find the right mix.
-- You MUST call getDirections at least once to validate travel times between consecutive stops.
-- You MUST call finalizePlan exactly once at the end with your final plan.`;
-
-/* ── build itinerary using Gemini agent ─────────────────────── */
+/* ── build itinerary programmatically ─────────────────────── */
 
 export async function buildItinerary(request: PlanRequest): Promise<ItineraryResponse> {
-  const allSpots = await getAllSpots();
-  const spotsById = new Map(allSpots.map((s) => [s.id, s]));
+  console.log("[plan] Starting programmatic route build:", request.query);
 
-  // Collect directions data as the agent calls getDirections
-  const directionsCache: Record<string, { distanceKm: number; durationMinutes: number; summary: string }> = {};
+  // 1. Load all spots and try to match specific venue names from the query
+  const allSpots = await getAllSpots();
+
+  // Try to find venues mentioned by name in the query
+  const queryLower = request.query.toLowerCase();
+  const nameMatched: Spot[] = [];
+  for (const spot of allSpots) {
+    const nameLower = spot.name.toLowerCase();
+    // Check if the venue name (or a significant part) appears in the query
+    if (nameLower.length > 3 && queryLower.includes(nameLower)) {
+      nameMatched.push(spot);
+    }
+  }
+  console.log("[plan] Name-matched venues:", nameMatched.map(s => s.name));
 
   const model = process.env.GEMINI_MODEL || "gemini-2.0-flash-lite";
 
@@ -208,6 +196,24 @@ function buildHeuristicItinerary(
   return assemblePlan(syntheticPlan, request, spotsById, directionsCache);
 }
 
+function haversine(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) *
+    Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function formatTime(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = Math.round(minutes % 60);
+  const period = h >= 12 ? "PM" : "AM";
+  const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
+  return `${h12}:${String(m).padStart(2, "0")} ${period}`;
+}
+
 /* ── assemble the final ItineraryResponse ───────────────────── */
 
 async function assemblePlan(
@@ -228,7 +234,32 @@ async function assemblePlan(
     let legDistanceKm = 0;
     let legMinutes = 0;
 
-    if (i > 0) {
+    if (i === 0 && request.startLocation) {
+      // Leg from start location to first stop
+      const startKey = `${request.startLocation}→${spot.address}`;
+      const cached = directionsCache[startKey];
+      if (cached) {
+        legDistanceKm = cached.distanceKm;
+        legMinutes = cached.durationMinutes;
+      } else {
+        // Try to fetch directions for this leg
+        try {
+          const result = await getDirections({
+            originAddress: request.startLocation,
+            destinationAddress: spot.address,
+            travelMode: request.travelMode,
+          });
+          legDistanceKm = result.distanceKm;
+          legMinutes = result.durationMinutes;
+        } catch {
+          // Fallback: estimate ~10 min for start leg
+          legDistanceKm = 0.5;
+          legMinutes = 8;
+        }
+      }
+      totalDistanceKm += legDistanceKm;
+      totalTravelMinutes += legMinutes;
+    } else if (i > 0) {
       const prevSpot = spotsById.get(plan.stops[i - 1].spotId);
       if (prevSpot) {
         // Try to find cached directions

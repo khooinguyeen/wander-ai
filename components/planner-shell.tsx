@@ -52,11 +52,8 @@ import { cn } from "@/lib/utils";
 import { usePlaceDetails } from "@/lib/use-place-details";
 import { usePlacePhoto } from "@/lib/use-place-photo";
 import type {
-  ChatMode,
   ItineraryResponse,
   PlannedStop,
-  RecommendationItem,
-  RecommendationsResponse,
   TravelMode,
   Venue,
   VenueCategory
@@ -79,6 +76,7 @@ const LazyYouTubeEmbed = dynamic(
   { ssr: false, loading: () => <div className="h-[300px] animate-pulse rounded-lg bg-muted" /> }
 );
 
+
 const HAS_GOOGLE_MAPS = Boolean(process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY);
 
 const CATEGORY_ALL = "all" as const;
@@ -92,20 +90,16 @@ const CATEGORIES: { value: CategoryFilter; label: string; icon: React.ReactNode 
   { value: "attraction", label: "Attractions", icon: <MapPin className="size-3" /> },
 ];
 
-const SUGGESTIONS: Record<ChatMode, string[]> = {
-  "route-planning": [
-    "lowkey northside day with coffee and a lookout",
-    "southside brunch then sunset for a date",
-    "CBD fashion and food route for a visitor",
-    "lunch and fashion stores around Fitzroy"
-  ],
-  recommendations: [
-    "Recommend hidden cafes near Fitzroy",
-    "Best rooftop bars in CBD for date night",
-    "Top budget-friendly brunch spots in Carlton",
-    "Cozy places in Brunswick with chill vibe"
-  ]
-};
+const SUGGESTIONS = [
+  "Find me some cool places",
+  "Plan my day out",
+  "Show me hidden gems",
+  "I need brunch spots",
+  "Best cafes nearby",
+  "Build me a date day",
+  "Where's good for sunset?",
+  "Surprise me with something fun",
+];
 
 const PLACEHOLDERS = [
   "Plan me a date night...",
@@ -120,16 +114,20 @@ const PLACEHOLDERS = [
   "Build me the perfect Saturday...",
 ];
 
-const RECOMMENDATION_PLACEHOLDERS = [
-  "What vibe are you after?",
-  "Which suburb should I focus on?",
-  "Any budget range in mind?",
-  "Want hidden gems or popular spots?",
-  "Tell me area + mood and I'll narrow it down...",
+const welcomeMsgS = [
+  "Hey! Are you looking to find some cool places, or plan out your day?",
+  "G'day! Want to discover somewhere new, or plan a full day out?",
+  "Hey there! Keen to explore some spots, or want me to plan your day?",
+  "What's the vibe — browsing for cool places, or planning a whole day out?",
+  "Hey! Looking to find some gems, or want me to map out your day?",
+  "Alright, what are we doing — finding cool spots or building a day plan?",
+  "Hey! Want to explore what's around, or plan out where to go today?",
+  "G'day! Are we hunting for places, or planning the full route today?",
 ];
 
-const ROUTE_SWITCH_CONFIRM_PATTERN = /(switch|move).*(route planning)|route planning mode|confirm.*switch/i;
-const AFFIRMATIVE_PATTERN = /^(yes|y|yeah|yep|yup|sure|ok|okay|go ahead|please do|do it|confirm|sounds good)\b/i;
+function getRandomWelcome() {
+  return welcomeMsgS[Math.floor(Math.random() * welcomeMsgS.length)];
+}
 
 const WELCOME_PROMPTS_ROUTE = [
   "Hey! What kind of day are you planning? Give me the vibe — brunch crawl, date day, shopping + coffee, whatever you're feeling.",
@@ -156,16 +154,6 @@ function getRandomWelcome(mode: ChatMode) {
 }
 
 /* ── helpers ───────────────────────────────────────────────── */
-
-function prettyMode(mode: TravelMode) {
-  return mode.charAt(0).toUpperCase() + mode.slice(1);
-}
-
-function ModeIcon({ mode }: { mode: TravelMode }) {
-  if (mode === "walking") return <Footprints className="size-3" />;
-  if (mode === "transit") return <Train className="size-3" />;
-  return <Car className="size-3" />;
-}
 
 /** Extract text content from a UIMessage */
 function getMessageText(msg: { parts: Array<{ type: string; text?: string }> }): string {
@@ -353,7 +341,7 @@ const CATEGORY_ICON_SM: Record<string, React.ReactNode> = {
   cafe: <Coffee className="size-3" />,
   bar: <Wine className="size-3" />,
   attraction: <MapPin className="size-3" />,
-  shopping: <MapPin className="size-3" />,
+  shopping: <ShoppingBag className="size-3" />,
   other: <MapPin className="size-3" />,
 };
 
@@ -384,16 +372,16 @@ function VenueCard({
         )}
       >
         {/* Text content */}
-        <div className="p-3 space-y-1 min-w-0">
+        <div className="p-3.5 space-y-1 min-w-0">
           <div className="flex items-center gap-1.5 text-muted-foreground/60">
             {icon}
-            <span className="text-[0.6rem] capitalize">{venue.uiCategory}</span>
+            <span className="text-[0.7rem] capitalize">{venue.uiCategory}</span>
             {priceLabel(venue.price_level) && (
-              <span className="text-[0.6rem]">{priceLabel(venue.price_level)}</span>
+              <span className="text-[0.7rem]">{priceLabel(venue.price_level)}</span>
             )}
           </div>
-          <h3 className="text-sm font-semibold truncate leading-tight">{venue.name}</h3>
-          <p className="text-[0.7rem] text-muted-foreground/70 leading-relaxed line-clamp-2">
+          <h3 className="text-[0.85rem] font-semibold truncate leading-snug">{venue.name}</h3>
+          <p className="text-xs text-muted-foreground/70 leading-relaxed line-clamp-2">
             {venue.description}
           </p>
         </div>
@@ -509,12 +497,12 @@ function VenueList({
     <div className="space-y-4">
       {groups.map((group) => (
         <div key={group.suburb}>
-          <div className="suburb-header sticky top-0 z-10 flex items-center gap-2 px-1 py-1.5 mb-1.5">
+          <div className="suburb-header sticky top-0 z-10 flex items-center gap-2 px-1 py-2 mb-1.5">
             <MapPin className="size-3 text-primary/60" />
-            <span className="text-[0.7rem] font-semibold tracking-wide uppercase text-primary/80">
+            <span className="section-label text-primary/80">
               {group.suburb}
             </span>
-            <span className="text-[0.6rem] text-muted-foreground/50">{group.venues.length}</span>
+            <span className="text-xs text-muted-foreground/40">{group.venues.length}</span>
           </div>
           <div className="space-y-2">
             {group.venues.map((venue) => (
@@ -538,7 +526,7 @@ function VenueList({
 }
 
 /* ── Social embed helpers ───────────────────────────────── */
-type SocialLink = { platform: "tiktok" | "instagram" | "youtube" | "google-maps"; url: string; embedUrl: string | null };
+type SocialLink = { platform: "tiktok" | "instagram" | "youtube" | "facebook" | "google-maps"; url: string; embedUrl: string | null };
 
 function parseSocialUrls(raw: string): SocialLink[] {
   let urls: string[];
@@ -583,8 +571,8 @@ function SocialEmbeds({ links }: { links: SocialLink[] }) {
   if (embeddable.length === 0) return null;
 
   return (
-    <div className="space-y-2">
-      <p className="text-[0.6rem] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
+    <div className="space-y-2.5">
+      <p className="section-label">
         Featured on
       </p>
       <div className="flex flex-col gap-2">
@@ -621,7 +609,7 @@ function SocialEmbeds({ links }: { links: SocialLink[] }) {
 }
 
 /* ── Venue detail card (shown when a venue is selected) ──── */
-const CATEGORY_COLORS: Record<string, string> = {
+const CATEGORY_ROUTE_ANIM_COLORS: Record<string, string> = {
   restaurant: "oklch(0.7 0.18 50)",
   cafe: "oklch(0.65 0.18 310)",
   bar: "oklch(0.65 0.16 255)",
@@ -634,7 +622,7 @@ const CATEGORY_ICON: Record<string, React.ReactNode> = {
   cafe: <Coffee className="size-5" />,
   bar: <Wine className="size-5" />,
   attraction: <MapPin className="size-5" />,
-  shopping: <MapPin className="size-5" />,
+  shopping: <ShoppingBag className="size-5" />,
   other: <MapPin className="size-5" />,
 };
 
@@ -647,7 +635,7 @@ function VenueDetail({
 }) {
   const tags = parseTags(venue.tags);
   const socialLinks = parseSocialUrls(venue.source_urls);
-  const accentColor = CATEGORY_COLORS[venue.uiCategory] ?? "oklch(0.65 0.16 255)";
+  const accentColor = CATEGORY_ROUTE_ANIM_COLORS[venue.uiCategory] ?? "oklch(0.65 0.16 255)";
   const icon = CATEGORY_ICON[venue.uiCategory] ?? <MapPin className="size-5" />;
 
   // Fetch live Place details (photos, rating, hours, reviews) via Place ID
@@ -658,7 +646,7 @@ function VenueDetail({
   const hours = liveHours ?? (fallbackHours.length > 0 ? fallbackHours : undefined);
 
   return (
-    <div className="venue-detail rounded-2xl overflow-hidden">
+    <div className="venue-detail">
       {/* Photo carousel from Google Places */}
       {place?.photos && place.photos.length > 0 ? (
         <div className="flex gap-0.5 overflow-x-auto scrollbar-hide">
@@ -667,35 +655,35 @@ function VenueDetail({
               key={i}
               src={photo.url}
               alt={`${venue.name} photo ${i + 1}`}
-              className="h-36 w-auto object-cover flex-shrink-0"
+              className="h-44 w-auto object-cover flex-shrink-0"
               loading="lazy"
             />
           ))}
         </div>
       ) : placeLoading ? (
-        <div className="h-36 animate-pulse bg-muted" />
+        <div className="h-44 animate-pulse bg-muted" />
       ) : null}
 
       {/* Header */}
-      <div className="px-4 pt-3 pb-2">
+      <div className="px-5 pt-4 pb-2">
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-3">
             <div
-              className="grid place-items-center size-9 rounded-full"
+              className="grid place-items-center size-10 rounded-xl"
               style={{ background: accentColor }}
             >
               <span className="text-white">{icon}</span>
             </div>
             <div>
-              <h3 className="text-sm font-bold leading-tight">{venue.name}</h3>
-              <div className="flex items-center gap-1.5 mt-0.5">
-                <span className="text-[0.65rem] text-muted-foreground capitalize">{venue.uiCategory}</span>
-                <span className="text-[0.65rem] text-muted-foreground/50">·</span>
-                <span className="text-[0.65rem] text-muted-foreground">{venue.suburb !== "unknown" ? venue.suburb : venue.city}</span>
+              <h3 className="heading-serif text-base leading-tight">{venue.name}</h3>
+              <div className="flex items-center gap-1.5 mt-1">
+                <span className="text-xs text-muted-foreground capitalize">{venue.uiCategory}</span>
+                <span className="text-xs text-muted-foreground/40">·</span>
+                <span className="text-xs text-muted-foreground">{venue.suburb !== "unknown" ? venue.suburb : venue.city}</span>
                 {priceLabel(venue.price_level) && (
                   <>
-                    <span className="text-[0.65rem] text-muted-foreground/50">·</span>
-                    <span className="text-[0.65rem] text-muted-foreground">{priceLabel(venue.price_level)}</span>
+                    <span className="text-xs text-muted-foreground/40">·</span>
+                    <span className="text-xs text-muted-foreground">{priceLabel(venue.price_level)}</span>
                   </>
                 )}
               </div>
@@ -704,18 +692,18 @@ function VenueDetail({
           <button
             type="button"
             onClick={onClose}
-            className="shrink-0 grid place-items-center size-6 rounded-full hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
+            className="shrink-0 grid place-items-center size-7 rounded-lg hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
           >
-            <span className="text-xs">✕</span>
+            <span className="text-sm">✕</span>
           </button>
         </div>
 
         {/* Rating + open/closed from Google Places */}
         {place && (
-          <div className="flex items-center gap-3 mt-2">
+          <div className="flex items-center gap-3 mt-2.5">
             {place.rating != null && (
-              <span className="flex items-center gap-1 text-[0.65rem] font-medium">
-                <Star className="size-3 fill-amber-400 text-amber-400" />
+              <span className="flex items-center gap-1.5 text-xs font-medium">
+                <Star className="size-3.5 fill-amber-400 text-amber-400" />
                 {place.rating.toFixed(1)}
                 {place.userRatingCount != null && (
                   <span className="text-muted-foreground font-normal">({place.userRatingCount.toLocaleString()})</span>
@@ -724,7 +712,7 @@ function VenueDetail({
             )}
             {place.currentOpeningHours?.openNow != null && (
               <span className={cn(
-                "text-[0.6rem] font-semibold px-1.5 py-0.5 rounded-full",
+                "text-[0.7rem] font-medium px-2 py-0.5 rounded-md",
                 place.currentOpeningHours.openNow
                   ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
                   : "bg-red-500/15 text-red-600 dark:text-red-400"
@@ -737,20 +725,20 @@ function VenueDetail({
       </div>
 
       {/* Body */}
-      <div className="px-4 pb-4 pt-1 space-y-3">
-        <p className="text-xs text-muted-foreground/80 leading-relaxed">
+      <div className="px-5 pb-5 pt-1 space-y-4">
+        <p className="text-[0.8rem] text-muted-foreground/90 leading-[1.7]">
           {place?.editorialSummary?.text ?? venue.description}
         </p>
 
         {/* Vibe + tags */}
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap gap-1.5">
           {venue.vibe && (
-            <Badge variant="secondary" className="text-[0.6rem] font-medium capitalize">
+            <Badge variant="secondary" className="text-[0.7rem] font-medium capitalize rounded-md px-2 py-0.5">
               {venue.vibe}
             </Badge>
           )}
           {tags.map((tag) => (
-            <Badge key={tag} variant="outline" className="text-[0.6rem] font-normal opacity-80">
+            <Badge key={tag} variant="outline" className="text-[0.7rem] font-normal rounded-md px-2 py-0.5 opacity-80">
               {tag}
             </Badge>
           ))}
@@ -759,24 +747,31 @@ function VenueDetail({
         {/* Google reviews */}
         {place?.reviews && place.reviews.length > 0 && (
           <div className="space-y-2">
-            <p className="text-[0.6rem] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
+            <p className="section-label">
               Reviews
             </p>
             {place.reviews.map((review, i) => (
-              <div key={i} className="text-[0.65rem] rounded-lg bg-muted/40 p-2.5 space-y-1">
-                <div className="flex items-center gap-1.5">
-                  <span className="flex items-center gap-0.5">
+              <div key={i} className="text-[0.75rem] rounded-xl border border-border/30 p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="grid place-items-center size-6 rounded-full bg-primary/15 text-[0.6rem] font-bold text-primary shrink-0">
+                      {review.authorAttribution?.displayName?.[0]?.toUpperCase() ?? "?"}
+                    </span>
+                    <div className="flex flex-col">
+                      {review.authorAttribution?.displayName && (
+                        <span className="font-semibold text-foreground text-[0.75rem] leading-tight">{review.authorAttribution.displayName}</span>
+                      )}
+                      <span className="text-muted-foreground text-[0.65rem] leading-tight">{review.relativePublishTimeDescription}</span>
+                    </div>
+                  </div>
+                  <span className="flex items-center gap-0.5 shrink-0">
                     {Array.from({ length: review.rating }, (_, j) => (
                       <Star key={j} className="size-2.5 fill-amber-400 text-amber-400" />
                     ))}
                   </span>
-                  {review.authorAttribution?.displayName && (
-                    <span className="text-muted-foreground">{review.authorAttribution.displayName}</span>
-                  )}
-                  <span className="text-muted-foreground/60 ml-auto">{review.relativePublishTimeDescription}</span>
                 </div>
                 {review.text?.text && (
-                  <p className="text-muted-foreground/80 line-clamp-3">{review.text.text}</p>
+                  <p className="text-secondary-foreground leading-[1.55] line-clamp-3">{review.text.text}</p>
                 )}
               </div>
             ))}
@@ -787,21 +782,21 @@ function VenueDetail({
         <SocialEmbeds links={socialLinks} />
 
         {/* Meta row */}
-        <div className="flex items-center gap-3 text-[0.6rem] text-muted-foreground/70">
-          <span className="flex items-center gap-1">
-            <MapPin className="size-2.5" />
+        <div className="flex items-center gap-3 text-xs text-muted-foreground/70">
+          <span className="flex items-center gap-1.5">
+            <MapPin className="size-3" />
             {venue.suburb !== "unknown" ? venue.suburb : venue.city}
           </span>
           {hours && hours.length > 0 && (
             <details className="group inline">
-              <summary className="cursor-pointer hover:text-foreground transition-colors flex items-center gap-1">
-                <Clock3 className="size-2.5" />
+              <summary className="cursor-pointer hover:text-foreground transition-colors flex items-center gap-1.5">
+                <Clock3 className="size-3" />
                 Hours
-                <span className="group-open:rotate-180 transition-transform text-[0.5rem]">▾</span>
+                <span className="group-open:rotate-180 transition-transform text-[0.6rem]">▾</span>
               </summary>
-              <div className="mt-1.5 space-y-0.5 absolute z-10 bg-popover border border-border/40 rounded-lg p-2.5 shadow-lg text-[0.6rem]">
+              <div className="mt-2 space-y-0.5 absolute z-10 bg-popover border border-border/40 rounded-xl p-3 shadow-lg text-xs">
                 {hours.map((h) => (
-                  <p key={h} className="text-muted-foreground/80">{h}</p>
+                  <p key={h} className="text-muted-foreground/80 leading-relaxed">{h}</p>
                 ))}
               </div>
             </details>
@@ -809,22 +804,22 @@ function VenueDetail({
         </div>
 
         {/* Actions */}
-        <div className="flex gap-2">
+        <div className="flex gap-2 pt-1">
           {(place?.websiteUri ?? venue.website) && (
-            <Button size="sm" variant="outline" className="text-[0.65rem] flex-1 h-7 rounded-full" asChild>
+            <Button size="sm" variant="outline" className="text-xs flex-1 h-8 rounded-lg" asChild>
               <a href={(place?.websiteUri ?? venue.website)!} target="_blank" rel="noreferrer">
-                <ExternalLink className="size-3" />
+                <ExternalLink className="size-3.5" />
                 Website
               </a>
             </Button>
           )}
-          <Button size="sm" className="text-[0.65rem] flex-1 h-7 rounded-full" asChild>
+          <Button size="sm" className="text-xs flex-1 h-8 rounded-lg" asChild>
             <a
               href={place?.googleMapsUri ?? venue.google_maps_url ?? `https://www.google.com/maps/search/?api=1&query=${venue.lat},${venue.lng}`}
               target="_blank"
               rel="noreferrer"
             >
-              <ArrowUpRight className="size-3" />
+              <ArrowUpRight className="size-3.5" />
               Directions
             </a>
           </Button>
@@ -924,18 +919,226 @@ function PanelOpenButton({
   );
 }
 
+/* ── Route building animation ──────────────────────────────── */
+const ROUTE_ANIM_COLORS = ["#4f8cf9", "#f97316", "#22c55e", "#a855f7", "#ec4899", "#facc15"];
+
+/** Animated dots-and-lines showing the actual venues being route-optimised.
+ *  Maps real lat/lng to SVG coordinates and cycles through different orderings. */
+function RouteAnimation({ venues, className }: { venues?: Venue[]; className?: string }) {
+  const canvasRef = useRef<SVGSVGElement>(null);
+
+  // Convert real venues to SVG nodes, or fall back to generic Melbourne dots
+  const { nodes, labels } = useMemo(() => {
+    const spots = venues && venues.length >= 2 ? venues.slice(0, 8) : null;
+
+    if (!spots) {
+      return {
+        nodes: [
+          { x: 50, y: 15 }, { x: 80, y: 25 }, { x: 90, y: 50 },
+          { x: 72, y: 78 }, { x: 42, y: 85 }, { x: 15, y: 62 },
+          { x: 20, y: 35 }, { x: 52, y: 48 },
+        ],
+        labels: [] as string[],
+      };
+    }
+
+    // Project lat/lng to SVG space with padding
+    const lats = spots.map(v => v.lat);
+    const lngs = spots.map(v => v.lng);
+    const PAD = 12;
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+    const minLng = Math.min(...lngs);
+    const maxLng = Math.max(...lngs);
+    const rangeLat = maxLat - minLat || 0.01;
+    const rangeLng = maxLng - minLng || 0.01;
+
+    return {
+      nodes: spots.map(v => ({
+        x: PAD + ((v.lng - minLng) / rangeLng) * (100 - PAD * 2),
+        // Flip Y: higher lat = lower y in SVG
+        y: PAD + ((maxLat - v.lat) / rangeLat) * (80 - PAD * 2),
+      })),
+      labels: spots.map(v => {
+        // Short name: first 12 chars
+        const name = v.name.length > 14 ? v.name.slice(0, 12) + "..." : v.name;
+        return name;
+      }),
+    };
+  }, [venues]);
+
+  // Generate route permutations
+  const routes = useMemo(() => {
+    const n = nodes.length;
+    const indices = Array.from({ length: n }, (_, i) => i);
+    const perms: number[][] = [];
+
+    // Original order
+    perms.push([...indices]);
+    // Reverse
+    perms.push([...indices].reverse());
+
+    // Nearest-neighbour from different starts
+    for (let start = 0; start < n && perms.length < 6; start++) {
+      const remaining = [...indices];
+      const order: number[] = [];
+      let cur = remaining.splice(start, 1)[0];
+      order.push(cur);
+      while (remaining.length > 0) {
+        let best = 0;
+        let bestDist = Infinity;
+        for (let j = 0; j < remaining.length; j++) {
+          const d = Math.hypot(nodes[remaining[j]].x - nodes[cur].x, nodes[remaining[j]].y - nodes[cur].y);
+          if (d < bestDist) { bestDist = d; best = j; }
+        }
+        cur = remaining.splice(best, 1)[0];
+        order.push(cur);
+      }
+      const key = order.join(",");
+      if (!perms.some(p => p.join(",") === key)) perms.push(order);
+    }
+
+    // Random shuffles
+    for (let i = 0; i < 20 && perms.length < 6; i++) {
+      const shuffled = [...indices].sort(() => Math.random() - 0.5);
+      const key = shuffled.join(",");
+      if (!perms.some(p => p.join(",") === key)) perms.push(shuffled);
+    }
+
+    return perms.slice(0, 6);
+  }, [nodes]);
+
+  useEffect(() => {
+    const svg = canvasRef.current;
+    if (!svg || routes.length === 0 || nodes.length === 0) return;
+
+    let animId: number;
+    const startTime = performance.now();
+    const PHASE_DURATION = 2500;
+    const DRAW_DURATION = 1800;
+
+    const animate = (now: number) => {
+      const elapsed = now - startTime;
+      const phase = Math.floor(elapsed / PHASE_DURATION) % routes.length;
+      const drawProgress = Math.min(1, (elapsed % PHASE_DURATION) / DRAW_DURATION);
+      const color = ROUTE_ANIM_COLORS[phase % ROUTE_ANIM_COLORS.length];
+
+      let html = "";
+
+      // Draw all faded previous routes as ghost lines
+      for (let pi = 0; pi < routes.length; pi++) {
+        if (pi === phase) continue;
+        const ghostAlpha = 0.06;
+        const r = routes[pi];
+        if (!r) continue;
+        for (let i = 0; i < r.length - 1; i++) {
+          const from = nodes[r[i]];
+          const to = nodes[r[i + 1]];
+          html += `<line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" stroke="oklch(0.65 0.16 255 / ${ghostAlpha})" stroke-width="1" stroke-linecap="round" />`;
+        }
+      }
+
+      // Draw current route (animated)
+      const route = routes[phase % Math.max(1, routes.length)];
+      if (!route) { animId = requestAnimationFrame(animate); return; }
+      for (let i = 0; i < route.length - 1; i++) {
+        const segProgress = drawProgress * (route.length - 1) - i;
+        if (segProgress <= 0) continue;
+
+        const from = nodes[route[i]];
+        const to = nodes[route[i + 1]];
+        const t = Math.min(1, segProgress);
+
+        const x2 = from.x + (to.x - from.x) * t;
+        const y2 = from.y + (to.y - from.y) * t;
+
+        html += `<line x1="${from.x}" y1="${from.y}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-opacity="0.6" />`;
+
+        // Travel dot
+        if (t > 0.15 && t < 0.9) {
+          const dotT = (t * 2.5) % 1;
+          const dx = from.x + (to.x - from.x) * dotT;
+          const dy = from.y + (to.y - from.y) * dotT;
+          html += `<circle cx="${dx}" cy="${dy}" r="2.5" fill="${color}" opacity="0.9" />`;
+        }
+      }
+
+      // Draw nodes + labels
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i];
+        const nodeIdx = route.indexOf(i);
+        const reached = nodeIdx >= 0 && nodeIdx / (route.length - 1) <= drawProgress;
+        const isFirst = nodeIdx === 0;
+
+        // Glow ring for first node
+        if (isFirst) {
+          html += `<circle cx="${n.x}" cy="${n.y}" r="9" fill="${color}" opacity="0.1" class="route-anim-pulse" />`;
+        }
+
+        // Dot
+        const r = isFirst ? 4.5 : 3.5;
+        const dotColor = reached ? color : "oklch(0.65 0.16 255 / 0.3)";
+        html += `<circle cx="${n.x}" cy="${n.y}" r="${r}" fill="${dotColor}" />`;
+
+        // Ring for reached nodes
+        if (reached && !isFirst) {
+          html += `<circle cx="${n.x}" cy="${n.y}" r="${r + 2.5}" fill="none" stroke="${color}" stroke-width="1" opacity="0.3" />`;
+        }
+
+        // Label
+        if (labels[i]) {
+          const labelOpacity = reached ? 0.8 : 0.35;
+          html += `<text x="${n.x}" y="${n.y + (n.y > 60 ? -7 : 10)}" text-anchor="middle" font-size="3.2" font-family="system-ui, sans-serif" font-weight="${reached ? "600" : "400"}" fill="oklch(0.35 0.05 255 / ${labelOpacity})">${labels[i]}</text>`;
+        }
+      }
+
+      // Phase indicator dots at the bottom
+      for (let i = 0; i < routes.length; i++) {
+        const dotX = 50 - (routes.length - 1) * 3 + i * 6;
+        const isCurrent = i === phase;
+        html += `<circle cx="${dotX}" cy="92" r="${isCurrent ? 2 : 1.2}" fill="${isCurrent ? ROUTE_ANIM_COLORS[i % ROUTE_ANIM_COLORS.length] : "oklch(0.65 0.16 255 / 0.2)"}" />`;
+      }
+
+      svg.innerHTML = html;
+      animId = requestAnimationFrame(animate);
+    };
+
+    animId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(animId);
+  }, [nodes, labels, routes, ROUTE_ANIM_COLORS]);
+
+  return (
+    <svg
+      ref={canvasRef}
+      viewBox="0 0 100 96"
+      className={cn("route-build-anim", className)}
+      style={{ width: "100%", maxWidth: 300, aspectRatio: "100/96" }}
+    />
+  );
+}
+
 /* ── Stop card ─────────────────────────────────────────────── */
 function StopCard({
   stop,
   index,
   active,
-  onSelect
+  onSelect,
+  startLocation
 }: {
   stop: PlannedStop;
   index: number;
   active: boolean;
   onSelect: (id: string) => void;
+  startLocation?: string;
 }) {
+  const legLabel = index === 0 && startLocation
+    ? stop.legFromPreviousMinutes > 0
+      ? `${stop.legFromPreviousMinutes} min from ${startLocation}`
+      : `From ${startLocation}`
+    : stop.legFromPreviousMinutes > 0
+      ? `${stop.legFromPreviousMinutes} min · ${stop.legDistanceKm} km`
+      : "Route start";
+
   return (
     <button
       type="button"
@@ -947,25 +1150,23 @@ function StopCard({
           : "border-border/40 bg-transparent hover:bg-muted/40"
       )}
     >
-      <div className="grid place-items-center size-9 rounded-lg bg-primary text-primary-foreground font-bold font-mono text-xs">
+      <div className="grid place-items-center size-9 rounded-lg bg-primary text-primary-foreground font-semibold font-mono text-xs">
         {String(index + 1).padStart(2, "0")}
       </div>
       <div className="space-y-1 min-w-0">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-[0.65rem] text-muted-foreground">
+          <span className="text-xs text-muted-foreground">
             {stop.arrivalTime}
           </span>
-          <span className="text-[0.65rem] text-muted-foreground">
-            {stop.legFromPreviousMinutes > 0
-              ? `${stop.legFromPreviousMinutes} min · ${stop.legDistanceKm} km`
-              : "Route start"}
+          <span className="text-xs text-muted-foreground">
+            {legLabel}
           </span>
         </div>
-        <h3 className="text-sm font-semibold truncate">{stop.spot.name}</h3>
-        <p className="text-[0.65rem] text-muted-foreground">
+        <h3 className="text-[0.85rem] font-semibold truncate">{stop.spot.name}</h3>
+        <p className="text-xs text-muted-foreground">
           {stop.spot.area} · {stop.spot.kind} · {stop.spot.priceBand ?? "Free"}
         </p>
-        <p className="text-[0.65rem] text-muted-foreground/70 leading-relaxed">
+        <p className="text-xs text-muted-foreground/70 leading-[1.6]">
           {stop.reason}
         </p>
       </div>
@@ -987,10 +1188,70 @@ export function PlannerShell() {
   const [pendingModeSwitchMessage, setPendingModeSwitchMessage] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
   const [venueSearch, setVenueSearch] = useState("");
+  const [aiFilterActive, setAiFilterActive] = useState(false);
+  const [aiFilteredIds, setAiFilteredIds] = useState<Set<string> | null>(null);
   const [selectedVenueId, setSelectedVenueId] = useState<string | null>(null);
+  const leftScrollRef = useRef<HTMLDivElement>(null);
   const [leftOpen, setLeftOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
-  const { resolvedTheme } = useTheme();
+  const [mobileTab, setMobileTab] = useState<"places" | "chat">("chat");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  /* ── Mobile panel drag-to-resize ──────────────────────── */
+  const PANEL_MIN_H = 8;
+  const PANEL_MAX_H = 85; // cap below the search icon
+  const PANEL_DEFAULT_H = 52;
+  const PANEL_COLLAPSE_THRESHOLD = 15; // below this → collapse entirely
+  const [panelHeight, setPanelHeight] = useState(PANEL_DEFAULT_H);
+  const [panelCollapsed, setPanelCollapsed] = useState(false);
+
+  const handleSelectVenue = useCallback((id: string) => {
+    setSelectedVenueId(id);
+    leftScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    // If mobile panel is collapsed, expand it to Places
+    if (panelCollapsed) {
+      setPanelCollapsed(false);
+      setPanelHeight(PANEL_DEFAULT_H);
+      setMobileTab("places");
+    }
+  }, [panelCollapsed, PANEL_DEFAULT_H]);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragRef = useRef({ startY: 0, startH: PANEL_DEFAULT_H });
+
+  const onDragStart = useCallback((e: React.PointerEvent) => {
+    setIsDragging(true);
+    dragRef.current = { startY: e.clientY, startH: panelHeight };
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  }, [panelHeight]);
+
+  const onDragMove = useCallback((e: React.PointerEvent) => {
+    if (!isDragging) return;
+    const deltaY = dragRef.current.startY - e.clientY;
+    const deltaDvh = (deltaY / window.innerHeight) * 100;
+    setPanelHeight(Math.min(PANEL_MAX_H, Math.max(PANEL_MIN_H, dragRef.current.startH + deltaDvh)));
+  }, [isDragging]);
+
+  const onDragEnd = useCallback(() => {
+    if (!isDragging) return;
+    setIsDragging(false);
+    setPanelHeight(prev => {
+      if (prev < PANEL_COLLAPSE_THRESHOLD) {
+        setPanelCollapsed(true);
+        return 0;
+      }
+      if (prev > 80) return PANEL_MAX_H;
+      return prev;
+    });
+  }, [isDragging, PANEL_COLLAPSE_THRESHOLD]);
+
+  const expandPanel = useCallback((tab: "places" | "chat") => {
+    setMobileTab(tab);
+    setPanelCollapsed(false);
+    setPanelHeight(PANEL_DEFAULT_H);
+  }, [PANEL_DEFAULT_H]);
+  const { resolvedTheme, theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   const [introPhase, setIntroPhase] = useState<
     "welcome" | "windy" | "map" | "chat" | "typing" | "done"
   >("welcome");
@@ -1038,24 +1299,27 @@ export function PlannerShell() {
   );
 
   const filteredVenues = useMemo(() => {
+    // AI RAG filter takes priority — show only matched venue IDs
+    if (aiFilterActive && aiFilteredIds) {
+      return venues.filter((v) => aiFilteredIds.has(v.id));
+    }
     let result = venues;
     if (categoryFilter !== "all") result = result.filter((v) => v.uiCategory === categoryFilter);
     if (venueSearch.trim()) {
-      const q = venueSearch.toLowerCase();
-      result = result.filter((v) =>
-        v.name.toLowerCase().includes(q) ||
-        v.suburb.toLowerCase().includes(q) ||
-        v.city.toLowerCase().includes(q) ||
-        (v.vibe ?? "").toLowerCase().includes(q) ||
-        v.tags.toLowerCase().includes(q)
-      );
+      const words = venueSearch.toLowerCase().split(/\s+/).filter(w => w.length > 1);
+      if (words.length > 0) {
+        result = result.filter((v) => {
+          const haystack = `${v.name} ${v.suburb} ${v.city} ${v.vibe ?? ""} ${v.tags} ${v.description ?? ""}`.toLowerCase();
+          return words.some(w => haystack.includes(w));
+        });
+      }
     }
     return result;
   }, [categoryFilter, venueSearch, venues]);
 
   const activeTransport = useMemo(
-    () => new DefaultChatTransport({ api: "/api/chat", body: { mode: chatMode } }),
-    [chatMode]
+    () => new DefaultChatTransport({ api: "/api/chat" }),
+    []
   );
 
   // v5 useChat — transport-based, sendMessage API
@@ -1346,6 +1610,24 @@ export function PlannerShell() {
     sendMessage({ text });
   }
 
+  const handleReset = useCallback(() => {
+    setMessages([{
+      id: "welcome",
+      role: "assistant",
+      parts: [{ type: "text", text: welcomeMsg }]
+    }]);
+    setInput("");
+    setActiveStopId(null);
+    setActiveCategories(new Set());
+    setActivePlatforms(new Set());
+    setVenueSearch("");
+    setAiFilterActive(false);
+    setAiFilteredIds(null);
+    setSelectedVenueId(null);
+    setMobileMenuOpen(false);
+    setShownSuggestions([...SUGGESTIONS].sort(() => Math.random() - 0.5).slice(0, 4));
+  }, [welcomeMsg, setMessages]);
+
   return (
     <main className="shell">
       {/* welcome overlay */}
@@ -1363,7 +1645,7 @@ export function PlannerShell() {
               <AgentIcon className="intro-overlay__icon" />
             )}
           </div>
-          <p className="intro-overlay__name">Mappy</p>
+          <p className="intro-overlay__name font-serif">Mappy</p>
         </div>
       )}
 
@@ -1378,10 +1660,12 @@ export function PlannerShell() {
           activeStopId={activeStopId}
           selectedVenueId={selectedVenueId}
           onSelectStop={setActiveStopId}
-          onSelectVenue={setSelectedVenueId}
+          onSelectVenue={handleSelectVenue}
+          onDeselectVenue={() => setSelectedVenueId(null)}
           startLocation={startLocation}
           travelMode={travelMode}
           colorScheme={resolvedTheme === "dark" ? "DARK" : "LIGHT"}
+          isPlanning={isPlanning}
         />
       </div>
 
@@ -1397,6 +1681,8 @@ export function PlannerShell() {
         {/* Panel open buttons — visible when closed, hidden when open */}
         <PanelOpenButton side="left" open={leftOpen} onToggle={() => setLeftOpen(true)} icon={<MapPin className="size-4" />} />
         <PanelOpenButton side="right" open={rightOpen} onToggle={() => setRightOpen(true)} icon={<MessageCircle className="size-4" />} />
+
+        {/* Mobile theme toggle removed — now inside mobile menu overlay */}
       </div>
 
       {/* ── LEFT: workspace ────────────────────────────────── */}
@@ -1409,8 +1695,14 @@ export function PlannerShell() {
         >
           <ArrowUpRight className="size-2.5 rotate-[-90deg]" />
         </button>
-        <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide">
-          <div className="p-5 space-y-5">
+        <div ref={leftScrollRef} className="flex-1 min-h-0 overflow-y-auto scrollbar-hide">
+          {/* Venue detail — flush at top, outside padded content */}
+          {!itinerary && !isPlanning && selectedVenue && (
+            <VenueDetail
+              venue={selectedVenue}
+              onClose={() => setSelectedVenueId(null)}
+            />
+          )}
 
             {chatMode === "recommendations" ? (
               <>
@@ -1512,27 +1804,27 @@ export function PlannerShell() {
               <>
                 {/* Route overview */}
                 <Card className="border-primary/20 bg-primary/5 shadow-none">
-                  <CardHeader className="px-4 pt-4 pb-2">
-                    <CardDescription className="text-[0.6rem] font-semibold tracking-[0.12em] uppercase text-primary/80">
+                  <CardHeader className="px-5 pt-5 pb-2">
+                    <CardDescription className="section-label text-primary/80">
                       Your route
                     </CardDescription>
-                    <CardTitle className="text-sm font-semibold">
+                    <CardTitle className="heading-serif text-base">
                       {itinerary.dayTheme}
                     </CardTitle>
                   </CardHeader>
-                  <CardContent className="px-4 pb-4">
-                    <p className="text-xs text-muted-foreground leading-relaxed">
+                  <CardContent className="px-5 pb-5">
+                    <p className="text-[0.8rem] text-muted-foreground leading-[1.7]">
                       {itinerary.summary}
                     </p>
-                    <div className="grid grid-cols-3 gap-2 mt-3">
+                    <div className="grid grid-cols-3 gap-2.5 mt-4">
                       {[
                         { label: "Travel", value: `${itinerary.route.totalTravelMinutes} min` },
                         { label: "Distance", value: `${itinerary.route.totalDistanceKm} km` },
                         { label: "Area", value: itinerary.areaSummary }
                       ].map((m) => (
-                        <div key={m.label} className="rounded-lg bg-muted/50 p-2.5">
-                          <span className="text-[0.6rem] text-muted-foreground">{m.label}</span>
-                          <strong className="block text-sm font-mono mt-0.5">{m.value}</strong>
+                        <div key={m.label} className="rounded-xl bg-muted/50 p-3">
+                          <span className="text-xs text-muted-foreground">{m.label}</span>
+                          <strong className="block text-sm font-mono mt-1">{m.value}</strong>
                         </div>
                       ))}
                     </div>
@@ -1547,8 +1839,8 @@ export function PlannerShell() {
                   />
                 ) : activeStop ? (
                   <Card className="border-border/30 bg-card/40 shadow-none">
-                    <CardContent className="p-4 space-y-1">
-                      <p className="text-[0.6rem] font-semibold tracking-[0.12em] uppercase text-primary/80">
+                    <CardContent className="p-5 space-y-1.5">
+                      <p className="section-label text-primary/80">
                         Highlighted
                       </p>
                       <p className="text-sm font-semibold text-foreground">{activeStop.spot.name}</p>
@@ -1561,8 +1853,8 @@ export function PlannerShell() {
 
                 {/* Stops timeline */}
                 <div>
-                  <div className="flex items-center justify-between mb-2.5">
-                    <h3 className="text-sm font-semibold">Stops</h3>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="heading-serif text-[0.95rem]">Stops</h3>
                     <span className="text-xs text-muted-foreground">
                       {itinerary.stops.length} selected
                     </span>
@@ -1575,6 +1867,7 @@ export function PlannerShell() {
                         index={i}
                         active={activeStop?.spot.id === s.spot.id}
                         onSelect={setActiveStopId}
+                        startLocation={startLocation}
                       />
                     ))}
                   </div>
@@ -1583,17 +1876,17 @@ export function PlannerShell() {
                 {/* Backups */}
                 {itinerary.backups.length > 0 && (
                   <div>
-                    <div className="flex items-center justify-between mb-2.5">
-                      <h3 className="text-sm font-semibold">Backups</h3>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="heading-serif text-[0.95rem]">Backups</h3>
                       <span className="text-xs text-muted-foreground">Swap if needed</span>
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-2 gap-2.5">
                       {itinerary.backups.map((sp) => (
                         <Card key={sp.id} className="border-border/30 bg-card/30 shadow-none py-0">
-                          <CardContent className="p-3 space-y-0.5">
-                            <p className="text-[0.6rem] text-muted-foreground">{sp.kind}</p>
-                            <p className="text-xs font-semibold">{sp.name}</p>
-                            <p className="text-[0.6rem] text-muted-foreground">{sp.area}</p>
+                          <CardContent className="p-3.5 space-y-0.5">
+                            <p className="text-xs text-muted-foreground">{sp.kind}</p>
+                            <p className="text-[0.8rem] font-semibold">{sp.name}</p>
+                            <p className="text-xs text-muted-foreground">{sp.area}</p>
                           </CardContent>
                         </Card>
                       ))}
@@ -1603,23 +1896,23 @@ export function PlannerShell() {
 
                 {/* Top matches */}
                 <div>
-                  <div className="flex items-center justify-between mb-2.5">
-                    <h3 className="text-sm font-semibold">Top matches</h3>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="heading-serif text-[0.95rem]">Top matches</h3>
                     <span className="text-xs text-muted-foreground">Pre-route ranking</span>
                   </div>
-                  <div className="space-y-1.5">
+                  <div className="space-y-2">
                     {itinerary.candidates.slice(0, 6).map((c) => (
                       <div
                         key={c.id}
-                        className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border/20"
+                        className="flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl border border-border/20"
                       >
                         <div className="min-w-0">
-                          <p className="text-xs font-semibold truncate">{c.name}</p>
-                          <p className="text-[0.65rem] text-muted-foreground">
+                          <p className="text-[0.8rem] font-semibold truncate">{c.name}</p>
+                          <p className="text-xs text-muted-foreground">
                             {c.area} &middot; {c.kind}
                           </p>
                         </div>
-                        <Badge variant="outline" className="shrink-0 font-mono text-[0.6rem]">
+                        <Badge variant="outline" className="shrink-0 font-mono text-xs rounded-md">
                           {c.matchScore}
                         </Badge>
                       </div>
@@ -1627,7 +1920,7 @@ export function PlannerShell() {
                   </div>
                 </div>
 
-                <Button size="sm" className="w-full" asChild>
+                <Button size="sm" className="w-full rounded-xl" asChild>
                   <a
                     href={itinerary.route.googleMapsUrl}
                     target="_blank"
@@ -1645,44 +1938,46 @@ export function PlannerShell() {
                 <p className="text-xs text-muted-foreground/60">Tell me to try again and I&apos;ll rebuild the route.</p>
               </div>
             ) : isPlanning ? (
-              <div className="grid gap-4 py-8 justify-items-center text-center">
-                <div className="grid place-items-center size-12 rounded-2xl bg-primary/15 text-primary animate-pulse">
-                  <Route className="size-5" />
-                </div>
-                <div className="space-y-1.5">
-                  <h2 className="text-base font-bold">Building your route</h2>
-                  <p className="text-sm text-muted-foreground leading-relaxed max-w-[260px]">
+              <div className="grid gap-4 py-6 justify-items-center text-center">
+                <RouteAnimation venues={filteredVenues} />
+                <div className="space-y-2">
+                  <h2 className="heading-serif text-lg">Building your route</h2>
+                  <p className="text-[0.85rem] text-muted-foreground leading-[1.7] max-w-[260px]">
                     Searching {venues.length}+ spots, ranking matches,
                     and projecting the best sequence...
                   </p>
                 </div>
-                <div className="flex gap-1.5 mt-2">
-                  <span className="planning-dot size-2 rounded-full bg-primary/60" />
-                  <span className="planning-dot size-2 rounded-full bg-primary/60" style={{ animationDelay: "0.2s" }} />
-                  <span className="planning-dot size-2 rounded-full bg-primary/60" style={{ animationDelay: "0.4s" }} />
-                </div>
               </div>
             ) : (
-              <div className="space-y-3">
-                {selectedVenue && (
-                  <VenueDetail
-                    venue={selectedVenue}
-                    onClose={() => setSelectedVenueId(null)}
-                  />
-                )}
-
+              <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-semibold">
                     {categoryFilter === "all" ? "All places" : CATEGORIES.find(c => c.value === categoryFilter)?.label}
                   </h3>
-                  <span className="text-xs text-muted-foreground">
-                    {filteredVenues.length} spots
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      {filteredVenues.length} spots
+                    </span>
+                    {aiFilterActive && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAiFilterActive(false);
+                          setAiFilteredIds(null);
+                          setVenueSearch("");
+                          setActiveCategories(new Set());
+                        }}
+                        className="text-[0.65rem] text-primary hover:text-primary/80 font-medium transition-colors"
+                      >
+                        Show all
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <VenueList
                   venues={filteredVenues}
                   selectedVenueId={selectedVenueId}
-                  onSelect={setSelectedVenueId}
+                  onSelect={handleSelectVenue}
                 />
               </div>
             )}
@@ -1769,7 +2064,7 @@ export function PlannerShell() {
         <div className="shrink-0 px-4 pb-4 pt-2 space-y-2.5">
           {messages.length <= 1 && (
             <div className="flex flex-col gap-2 px-1">
-              {SUGGESTIONS[chatMode].map((s, i) => (
+              {shownSuggestions.map((s, i) => (
                 <button
                   key={s}
                   type="button"
@@ -1813,9 +2108,9 @@ export function PlannerShell() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder={placeholder}
-              rows={1}
+              rows={3}
               disabled={isBusy}
-              className="block w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-[15px] text-foreground placeholder:text-muted-foreground/50 outline-none"
+              className="block w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-[15px] text-foreground placeholder:text-muted-foreground/50 outline-none min-h-[4.5rem]"
               style={{ fieldSizing: "content" } as React.CSSProperties}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
@@ -1825,6 +2120,16 @@ export function PlannerShell() {
               }}
             />
             <div className="flex items-center justify-end gap-2 px-3 pb-2.5">
+              {messages.length > 1 && (
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  className="shrink-0 grid place-items-center size-7 rounded-full text-muted-foreground/50 hover:text-foreground hover:bg-muted/30 transition-all"
+                  title="Reset"
+                >
+                  <RotateCcw className="size-3.5" />
+                </button>
+              )}
               <button
                 type="submit"
                 disabled={isBusy || !input.trim()}
@@ -1836,6 +2141,264 @@ export function PlannerShell() {
           </form>
         </div>
       </aside>
+
+      {/* ── MOBILE: expandable filter menu ──────────────── */}
+      <div className={cn("mobile-menu-overlay", mobileMenuOpen && "mobile-menu-overlay--open")}>
+        <div className="mobile-menu-overlay__content">
+          <div className="mobile-menu-overlay__row">
+            {CATEGORIES.map((cat) => (
+              <button
+                key={cat.value}
+                type="button"
+                onClick={() => toggleCategory(cat.value)}
+                className={cn(
+                  "grid place-items-center size-8 rounded-full transition-all duration-150",
+                  activeCategories.has(cat.value)
+                    ? "bg-secondary text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+                )}
+                title={cat.value}
+              >
+                {cat.icon}
+              </button>
+            ))}
+          </div>
+          <div className="mobile-menu-overlay__row">
+            {PLATFORMS.map((p) => (
+              <button
+                key={p.value}
+                type="button"
+                onClick={() => togglePlatform(p.value)}
+                className={cn(
+                  "grid place-items-center size-8 rounded-full transition-all duration-150",
+                  activePlatforms.has(p.value)
+                    ? "bg-secondary text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+                )}
+                title={p.value}
+              >
+                {p.icon}
+              </button>
+            ))}
+          </div>
+          <div className="mobile-menu-overlay__search">
+            <Search className="size-3.5 text-muted-foreground/50 shrink-0" />
+            <input
+              value={venueSearch}
+              onChange={(e) => setVenueSearch(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Escape") setVenueSearch(""); }}
+              placeholder="Search places..."
+              className="bg-transparent text-[0.75rem] text-foreground placeholder:text-muted-foreground/40 outline-none flex-1"
+            />
+          </div>
+          <button
+            type="button"
+            className="mobile-menu-overlay__theme"
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          >
+            {mounted && theme === "dark" ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />}
+            <span>{mounted && theme === "dark" ? "Light mode" : "Dark mode"}</span>
+          </button>
+        </div>
+        {/* Tap outside to close */}
+        <div className="mobile-menu-overlay__backdrop" onClick={() => setMobileMenuOpen(false)} />
+      </div>
+
+      {/* ── MOBILE: floating menu button ───────────────── */}
+      <button
+        type="button"
+        className="mobile-menu-btn"
+        onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+        aria-label="Toggle filters menu"
+      >
+        <Search className="size-4" />
+      </button>
+
+      {/* ── MOBILE: floating tab pill ────────────────── */}
+      <div
+        className={cn("mobile-tab-pill", isDragging && "mobile-tab-pill--dragging")}
+        style={{ bottom: panelCollapsed ? "12px" : `calc(${panelHeight}dvh + 8px)` }}
+      >
+        <button
+          type="button"
+          className={cn("mobile-tab-pill__btn", !panelCollapsed && mobileTab === "places" && "mobile-tab-pill__btn--active")}
+          onClick={() => expandPanel("places")}
+        >
+          <MapPin className="size-3.5" />
+          Places
+        </button>
+        <button
+          type="button"
+          className={cn("mobile-tab-pill__btn", !panelCollapsed && mobileTab === "chat" && "mobile-tab-pill__btn--active")}
+          onClick={() => expandPanel("chat")}
+        >
+          <AgentIcon className="size-4" />
+          Mappy
+        </button>
+      </div>
+
+      {/* ── MOBILE: single bottom panel ────────────────── */}
+      <div
+        className={cn("mobile-panel", isDragging && "mobile-panel--dragging", panelCollapsed && "mobile-panel--collapsed")}
+        style={{ height: panelCollapsed ? "0px" : `${panelHeight}dvh` }}
+      >
+        {/* Drag handle */}
+        <div
+          className="mobile-panel__drag-handle"
+          onPointerDown={onDragStart}
+          onPointerMove={onDragMove}
+          onPointerUp={onDragEnd}
+          onPointerCancel={onDragEnd}
+        >
+          <div className="mobile-panel__drag-knob" />
+        </div>
+
+        {/* Panel content */}
+        <div className="mobile-panel__body scrollbar-hide">
+          {mobileTab === "places" ? (
+            /* ── Places content (mirrors left panel) ── */
+            <div ref={leftScrollRef} className="flex-1 min-h-0 overflow-y-auto scrollbar-hide">
+              {!itinerary && !isPlanning && selectedVenue && (
+                <VenueDetail
+                  venue={selectedVenue}
+                  onClose={() => setSelectedVenueId(null)}
+                />
+              )}
+              <div className="p-4 space-y-4">
+                {itinerary ? (
+                  <>
+                    <Card className="border-primary/20 bg-primary/5 shadow-none">
+                      <CardHeader className="px-4 pt-4 pb-2">
+                        <CardDescription className="section-label text-primary/80">Your route</CardDescription>
+                        <CardTitle className="heading-serif text-base">{itinerary.dayTheme}</CardTitle>
+                      </CardHeader>
+                      <CardContent className="px-4 pb-4">
+                        <p className="text-[0.8rem] text-muted-foreground leading-[1.7]">{itinerary.summary}</p>
+                      </CardContent>
+                    </Card>
+                    <div className="space-y-2">
+                      {itinerary.stops.map((s, i) => (
+                        <StopCard key={s.spot.id} stop={s} index={i} active={activeStop?.spot.id === s.spot.id} onSelect={setActiveStopId} startLocation={startLocation} />
+                      ))}
+                    </div>
+                    <Button size="sm" className="w-full rounded-xl" asChild>
+                      <a href={itinerary.route.googleMapsUrl} target="_blank" rel="noreferrer">
+                        <ArrowUpRight className="size-3.5" /> Open in Google Maps
+                      </a>
+                    </Button>
+                  </>
+                ) : isPlanning ? (
+                  <div className="grid gap-3 py-4 justify-items-center text-center">
+                    <RouteAnimation venues={filteredVenues} className="max-w-[200px]" />
+                    <p className="text-[0.85rem] text-muted-foreground">Building your route...</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="heading-serif text-[0.9rem]">
+                        {aiFilterActive ? "Mappy picks" : activeCategories.size === 0 ? "All places" : [...activeCategories].join(", ")}
+                      </h3>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">{filteredVenues.length} spots</span>
+                        {aiFilterActive && (
+                          <button
+                            type="button"
+                            onClick={() => { setAiFilterActive(false); setAiFilteredIds(null); setVenueSearch(""); setActiveCategories(new Set()); }}
+                            className="text-[0.65rem] text-primary hover:text-primary/80 font-medium transition-colors"
+                          >
+                            Show all
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <VenueList venues={filteredVenues} selectedVenueId={selectedVenueId} onSelect={handleSelectVenue} />
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            /* ── Chat content (mirrors right panel) ── */
+            <div className="flex flex-col flex-1 min-h-0">
+              <Conversation className="flex-1 min-h-0">
+                <ConversationContent className="gap-4 px-4 py-4">
+                  {visibleMessages.map((m) => {
+                    const isUser = (m.role as string) === "user";
+                    return isUser ? (
+                      <div key={m.id} className="chat-msg flex justify-end">
+                        <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary/15 px-3 py-2">
+                          <p className="text-[14px] leading-[1.6] text-foreground">{getMessageText(m)}</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div key={m.id} className="chat-msg flex items-start gap-2.5">
+                        <div className="shrink-0 mt-0.5 grid place-items-center size-6">
+                          <AgentIcon className="size-5" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <ChatMd className="text-[14px] leading-[1.7] text-foreground">
+                            {getMessageText(m)}
+                          </ChatMd>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {isBusy && visibleMessages[visibleMessages.length - 1]?.role !== "assistant" && (
+                    <div className="chat-msg flex items-start gap-2.5">
+                      <div className="shrink-0 mt-0.5 grid place-items-center size-6">
+                        <AgentIconWindy className="size-5" />
+                      </div>
+                      <div className="leaf-wind h-6 mt-1">
+                        <span className="leaf-wind__leaf">🍃</span>
+                        <span className="leaf-wind__leaf">🍃</span>
+                        <span className="leaf-wind__leaf">🍃</span>
+                      </div>
+                    </div>
+                  )}
+                </ConversationContent>
+                <ConversationScrollButton className="bottom-2" />
+              </Conversation>
+              <div className="shrink-0 px-3 pb-3 pt-2 space-y-2">
+                <form
+                  onSubmit={(e) => { e.preventDefault(); handleSend(); }}
+                  className="composer-box rounded-2xl border-2 border-border/30 bg-muted/10 transition-all focus-within:border-primary/50 focus-within:shadow-[0_0_0_3px_oklch(0.65_0.16_255/0.15)]"
+                >
+                  <textarea
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder={placeholder}
+                    rows={1}
+                    disabled={isBusy}
+                    className="block w-full resize-none bg-transparent px-3 pt-3 pb-1 text-[14px] text-foreground placeholder:text-muted-foreground/50 outline-none"
+                    style={{ fieldSizing: "content" } as React.CSSProperties}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+                    }}
+                  />
+                  <div className="flex items-center justify-end gap-2 px-3 pb-2">
+                    {messages.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={handleReset}
+                        className="shrink-0 grid place-items-center size-7 rounded-full text-muted-foreground/50 hover:text-foreground hover:bg-muted/30 transition-all"
+                        title="Reset"
+                      >
+                        <RotateCcw className="size-3.5" />
+                      </button>
+                    )}
+                    <button
+                      type="submit"
+                      disabled={isBusy || !input.trim()}
+                      className="shrink-0 grid place-items-center size-7 rounded-full bg-foreground/20 text-foreground disabled:opacity-15 hover:bg-foreground/30 transition-all"
+                    >
+                      <ArrowUpRight className="size-3.5" />
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </main>
   );
 }

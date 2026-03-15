@@ -1,4 +1,4 @@
-import { google } from "@ai-sdk/google";
+import { anthropic } from "@ai-sdk/anthropic";
 import { convertToModelMessages, stepCountIs, streamText, tool, type UIMessage } from "ai";
 import { z } from "zod";
 
@@ -9,7 +9,7 @@ import type { RecommendationPreferences, TravelMode } from "@/lib/types";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const ROUTE_SYSTEM_PROMPT = `You are Scout, a Melbourne route-planning copilot.
+const SYSTEM_PROMPT = `You are Mappy, a Melbourne route-planning copilot.
 
 Your job is to collect sharp preferences, then build a personalized route.
 
@@ -66,10 +66,8 @@ Your job is to collect sharp preferences, then build a personalized route.
 - Apply the user's requested edit in the new query.
 - Never claim a swap/update was completed unless buildRoute has returned in this response.
 
-## Style
-- Use Australian casual English. "Reckon", "solid pick", "keen?" are fine.
-- No emojis unless the user uses them first.
-- Never say "I'm an AI" or "as a language model".`;
+### Path B: "Plan my day" (route planning)
+This is a guided step-by-step flow. After each question you ask, call filterPlaces so the user can see relevant recommendations in the places panel as you go.
 
 const RECOMMENDATIONS_SYSTEM_PROMPT = `You are Scout, a Melbourne recommendations copilot.
 
@@ -306,7 +304,7 @@ export async function POST(req: Request) {
         }
       })
     },
-    stopWhen: stepCountIs(3)
+    stopWhen: stepCountIs(50)
   });
 
   return result.toUIMessageStreamResponse();

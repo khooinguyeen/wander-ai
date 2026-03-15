@@ -39,6 +39,7 @@
   --color-sidebar-ring: oklch(0.55 0.18 255);
   --radius: 0.625rem;
   --font-sans: var(--font-sans);
+  --font-serif: var(--font-serif);
   --font-mono: var(--font-mono);
 }
 
@@ -90,6 +91,24 @@ html, body {
 body {
   @apply bg-background text-foreground;
   font-family: var(--font-sans), -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  letter-spacing: -0.011em;
+}
+
+/* ── Notion-like typography utilities ─────────────────────── */
+.font-serif { font-family: var(--font-serif), Georgia, serif; }
+.heading-serif {
+  font-family: var(--font-serif), Georgia, serif;
+  letter-spacing: -0.02em;
+  font-weight: 600;
+}
+.section-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--color-muted-foreground);
+  letter-spacing: 0;
 }
 
 /* ── shell ─────────────────────────────────────────────────── */
@@ -127,29 +146,54 @@ body {
   border-radius: 1rem;
   overflow: hidden;
   transition: background 0.3s, border-color 0.3s, box-shadow 0.3s;
-}
-
-/* Glass panel — dark translucent glass in both themes.
-   Override ALL color vars so text is always bright white on dark glass. */
-.glass-panel {
   backdrop-filter: blur(40px) saturate(180%);
   -webkit-backdrop-filter: blur(40px) saturate(180%);
-  background: oklch(0.1 0.005 285 / 0.82);
-  border: 1px solid oklch(1 0 0 / 0.1);
+}
+
+/* Light mode — translucent glass with dark text */
+html:not(.dark) .glass-panel {
+  background: oklch(1 0 0 / 0.72);
+  border: 1px solid oklch(0 0 0 / 0.08);
+  box-shadow:
+    0 1px 3px oklch(0 0 0 / 0.06),
+    0 12px 40px oklch(0 0 0 / 0.15);
+
+  --color-foreground: oklch(0.15 0.01 260);
+  --color-card: oklch(0 0 0 / 0.04);
+  --color-card-foreground: oklch(0.15 0.01 260);
+  --color-popover: oklch(1 0 0);
+  --color-popover-foreground: oklch(0.15 0.01 260);
+  --color-primary: oklch(0.55 0.18 255);
+  --color-primary-foreground: oklch(0.98 0 0);
+  --color-secondary: oklch(0 0 0 / 0.06);
+  --color-secondary-foreground: oklch(0.2 0.01 260);
+  --color-muted: oklch(0 0 0 / 0.04);
+  --color-muted-foreground: oklch(0.45 0.015 260);
+  --color-accent: oklch(0 0 0 / 0.06);
+  --color-accent-foreground: oklch(0.15 0.01 260);
+  --color-border: oklch(0 0 0 / 0.1);
+  --color-input: oklch(0 0 0 / 0.1);
+  --color-ring: oklch(0.55 0.18 255);
+}
+
+/* Dark mode — dark glass with white text */
+.dark .glass-panel {
+  color: oklch(1 0 0);
+  background: oklch(0.18 0.005 285 / 0.85);
+  border: 1px solid oklch(1 0 0 / 0.12);
   box-shadow: 0 24px 80px oklch(0 0 0 / 0.4);
 
-  /* White-on-dark palette — applies in BOTH light and dark themes */
-  --color-foreground: oklch(1 0 0);               /* pure white */
+  --color-foreground: oklch(1 0 0);
   --color-card: oklch(1 0 0 / 0.06);
   --color-card-foreground: oklch(1 0 0);
   --color-popover: oklch(0.16 0.004 285);
   --color-popover-foreground: oklch(1 0 0);
-  --color-primary: oklch(0.78 0.12 252);           /* bright blue */
+  --color-primary: oklch(0.78 0.12 252);
   --color-primary-foreground: oklch(1 0 0);
-  --color-secondary: oklch(1 0 0 / 0.08);
+  --color-secondary: oklch(0.28 0.006 285);
   --color-secondary-foreground: oklch(0.95 0 0);
   --color-muted: oklch(1 0 0 / 0.06);
-  --color-muted-foreground: oklch(0.85 0 0);       /* bright grey */
+  --color-muted-foreground: oklch(0.85 0 0);
   --color-accent: oklch(1 0 0 / 0.08);
   --color-accent-foreground: oklch(1 0 0);
   --color-border: oklch(1 0 0 / 0.14);
@@ -157,16 +201,30 @@ body {
   --color-ring: oklch(0.78 0.12 252);
 }
 
-/* Dark theme: force white text + stronger palette for contrast */
-.dark .glass-panel {
-  color: oklch(1 0 0);
-  background: oklch(0.18 0.005 285 / 0.85);
-  --color-secondary: oklch(0.28 0.006 285);     /* dark grey badge background */
-}
-
-/* Force Tailwind text utilities to use white palette inside glass panels (dark theme only).
+/* Force Tailwind text utilities inside glass panels.
    Needed because @theme inline compiles hardcoded color values into utilities,
    bypassing CSS variable overrides. Higher specificity wins. */
+
+/* Light mode — dark text */
+html:not(.dark) .glass-panel .text-foreground,
+html:not(.dark) .glass-panel .text-card-foreground,
+html:not(.dark) .glass-panel .text-popover-foreground,
+html:not(.dark) .glass-panel .text-accent-foreground,
+html:not(.dark) .floating-pill .text-foreground { color: oklch(0.15 0.01 260); }
+
+html:not(.dark) .glass-panel .text-secondary-foreground,
+html:not(.dark) .floating-pill .text-secondary-foreground { color: oklch(0.2 0.01 260); }
+html:not(.dark) .glass-panel .text-muted-foreground,
+html:not(.dark) .floating-pill .text-muted-foreground    { color: oklch(0.45 0.015 260); }
+html:not(.dark) .glass-panel .text-primary-foreground,
+html:not(.dark) .floating-pill .text-primary-foreground   { color: oklch(0.98 0 0); }
+
+html:not(.dark) .glass-panel .bg-secondary,
+html:not(.dark) .floating-pill .bg-secondary { background-color: oklch(0 0 0 / 0.06); }
+html:not(.dark) .glass-panel .bg-card\/40,
+html:not(.dark) .glass-panel .bg-secondary\/80 { background-color: oklch(0 0 0 / 0.04); }
+
+/* Dark mode — white text */
 .dark .glass-panel .text-foreground,
 .dark .glass-panel .text-card-foreground,
 .dark .glass-panel .text-popover-foreground,
@@ -186,14 +244,6 @@ body {
 /* Match card and user message bubble to the same background color */
 .dark .glass-panel .bg-card\/40,
 .dark .glass-panel .bg-secondary\/80 { background-color: oklch(0.22 0.006 285); }
-
-/* Light mode — slightly more transparent since the map behind is bright */
-html:not(.dark) .glass-panel {
-  background: oklch(0.1 0.005 285 / 0.2);
-  box-shadow:
-    0 1px 3px oklch(0 0 0 / 0.06),
-    0 12px 40px oklch(0 0 0 / 0.15);
-}
 
 .glass-panel--left { left: var(--panel-gap); }
 .glass-panel--right { right: var(--panel-gap); }
@@ -310,20 +360,20 @@ html:not(.dark) .panel-close-corner:hover {
 html:not(.dark) .floating-pill {
   backdrop-filter: blur(40px) saturate(180%);
   -webkit-backdrop-filter: blur(40px) saturate(180%);
-  background: oklch(0.1 0.005 285 / 0.2);
-  border: 1px solid oklch(1 0 0 / 0.1);
+  background: oklch(1 0 0 / 0.72);
+  border: 1px solid oklch(0 0 0 / 0.08);
   box-shadow:
     0 1px 3px oklch(0 0 0 / 0.06),
     0 12px 40px oklch(0 0 0 / 0.15);
 
-  --color-foreground: oklch(1 0 0);
-  --color-primary: oklch(0.78 0.12 252);
-  --color-primary-foreground: oklch(1 0 0);
-  --color-secondary: oklch(1 0 0 / 0.08);
-  --color-secondary-foreground: oklch(0.95 0 0);
-  --color-muted: oklch(1 0 0 / 0.06);
-  --color-muted-foreground: oklch(0.85 0 0);
-  --color-border: oklch(1 0 0 / 0.14);
+  --color-foreground: oklch(0.15 0.01 260);
+  --color-primary: oklch(0.55 0.18 255);
+  --color-primary-foreground: oklch(0.98 0 0);
+  --color-secondary: oklch(0 0 0 / 0.06);
+  --color-secondary-foreground: oklch(0.2 0.01 260);
+  --color-muted: oklch(0 0 0 / 0.04);
+  --color-muted-foreground: oklch(0.45 0.015 260);
+  --color-border: oklch(0 0 0 / 0.1);
 }
 
 /* Dark mode */
@@ -672,8 +722,8 @@ html:not(.dark) .directions-panel {
 
 /* ── venue detail card ──────────────────────────────────── */
 .venue-detail {
-  background: var(--color-card);
   animation: slide-up 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  border-bottom: 1px solid var(--color-border);
 }
 @keyframes slide-up {
   from { opacity: 0; transform: translateY(8px); }
@@ -894,13 +944,25 @@ html:not(.dark) .directions-panel {
 }
 
 /* ── responsive ────────────────────────────────────────────── */
-@media (max-width: 1100px) {
-  .glass-panel { --panel-w: min(340px, 38vw); }
+/* Hide mobile-only elements on desktop */
+.mobile-theme-toggle { display: none; }
+.mobile-menu-btn { display: none; }
+.mobile-menu-overlay { display: none; }
+.mobile-tab-pill { display: none; }
+
+@media (max-width: 1200px) {
+  .glass-panel { --panel-w: min(300px, 32vw); }
+  /* Swap full pill for the compact expandable button */
+  .floating-pill { display: none !important; }
+  .mobile-menu-btn { display: grid; }
+  .mobile-menu-overlay { display: block; }
 }
 
 @media (max-width: 900px) {
-  .glass-panel { --panel-w: min(320px, 44vw); }
+  .glass-panel { --panel-w: min(260px, 30vw); }
 }
+
+/* 900px and below → mobile layout (handled by mobile-panel media query) */
 
 /* ── Chat message animations ──────────────────────────────── */
 @keyframes chat-fade-in {
@@ -946,6 +1008,22 @@ html:not(.dark) .directions-panel {
   animation: planning-pulse 1.4s ease-in-out infinite;
 }
 
+/* route-building animation */
+@keyframes route-anim-glow {
+  0%, 100% { opacity: 0.08; r: 8; }
+  50%      { opacity: 0.2; r: 12; }
+}
+.route-anim-pulse {
+  animation: route-anim-glow 2s ease-in-out infinite;
+}
+.route-build-anim {
+  opacity: 0;
+  animation: route-anim-fadein 0.6s ease-out 0.2s forwards;
+}
+@keyframes route-anim-fadein {
+  to { opacity: 1; }
+}
+
 /* ── Pill search input ─────────────────────────────────────── */
 .pill-search {
   background: oklch(0 0 0 / 0.06);
@@ -982,17 +1060,368 @@ html:not(.dark) .directions-panel {
   background: linear-gradient(135deg, oklch(0.2 0.01 260 / 0.3), oklch(0.25 0.02 260 / 0.4));
 }
 
-@media (max-width: 700px) {
-  .glass-panel {
-    --panel-gap: 10px;
-    position: fixed;
-    top: auto;
-    left: var(--panel-gap);
-    right: var(--panel-gap);
-    bottom: var(--panel-gap);
-    width: auto;
-    max-height: 55dvh;
+/* ── Mobile panel (hidden on desktop) ─────────────────────── */
+.mobile-panel {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  /* Hide desktop panels, floating pill, and open buttons on mobile */
+  .glass-panel,
+  .glass-panel--collapsed-left,
+  .glass-panel--collapsed-right,
+  .floating-pill,
+  .panel-open-btn {
+    display: none !important;
   }
-  .glass-panel--left { z-index: 12; }
-  .glass-panel--right { z-index: 11; bottom: calc(55dvh + var(--panel-gap) * 2); max-height: 35dvh; }
+
+  /* Show mobile panel */
+  .mobile-panel {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    height: 52dvh;
+    border-radius: 1.25rem 1.25rem 0 0;
+    overflow: hidden;
+    backdrop-filter: blur(40px) saturate(180%);
+    -webkit-backdrop-filter: blur(40px) saturate(180%);
+    transition: height 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+                background 0.3s, border-color 0.3s;
+  }
+  .mobile-panel--dragging {
+    transition: background 0.3s, border-color 0.3s !important;
+  }
+  .mobile-panel--collapsed {
+    pointer-events: none;
+    opacity: 0;
+    border: none;
+  }
+
+  /* Light mode */
+  html:not(.dark) .mobile-panel {
+    background: oklch(1 0 0 / 0.85);
+    border-top: 1px solid oklch(0 0 0 / 0.08);
+    box-shadow: 0 -4px 30px oklch(0 0 0 / 0.12);
+
+    --color-foreground: oklch(0.15 0.01 260);
+    --color-card: oklch(0 0 0 / 0.04);
+    --color-card-foreground: oklch(0.15 0.01 260);
+    --color-secondary: oklch(0 0 0 / 0.06);
+    --color-secondary-foreground: oklch(0.2 0.01 260);
+    --color-muted: oklch(0 0 0 / 0.04);
+    --color-muted-foreground: oklch(0.45 0.015 260);
+    --color-border: oklch(0 0 0 / 0.1);
+    --color-primary: oklch(0.55 0.18 255);
+    --color-primary-foreground: oklch(0.98 0 0);
+  }
+
+  /* Dark mode */
+  .dark .mobile-panel {
+    background: oklch(0.16 0.005 285 / 0.92);
+    border-top: 1px solid oklch(1 0 0 / 0.1);
+    box-shadow: 0 -8px 40px oklch(0 0 0 / 0.4);
+    color: oklch(1 0 0);
+
+    --color-foreground: oklch(1 0 0);
+    --color-card: oklch(1 0 0 / 0.06);
+    --color-card-foreground: oklch(1 0 0);
+    --color-secondary: oklch(0.28 0.006 285);
+    --color-secondary-foreground: oklch(0.95 0 0);
+    --color-muted: oklch(1 0 0 / 0.06);
+    --color-muted-foreground: oklch(0.85 0 0);
+    --color-border: oklch(1 0 0 / 0.14);
+    --color-primary: oklch(0.78 0.12 252);
+    --color-primary-foreground: oklch(1 0 0);
+  }
+
+  /* Force text color overrides inside mobile panel (same as glass-panel) */
+  html:not(.dark) .mobile-panel .text-foreground,
+  html:not(.dark) .mobile-panel .text-card-foreground { color: oklch(0.15 0.01 260); }
+  html:not(.dark) .mobile-panel .text-muted-foreground { color: oklch(0.45 0.015 260); }
+  html:not(.dark) .mobile-panel .text-secondary-foreground { color: oklch(0.2 0.01 260); }
+  html:not(.dark) .mobile-panel .bg-secondary { background-color: oklch(0 0 0 / 0.06); }
+
+  .dark .mobile-panel .text-foreground,
+  .dark .mobile-panel .text-card-foreground { color: oklch(1 0 0); }
+  .dark .mobile-panel .text-muted-foreground { color: oklch(0.85 0 0); }
+  .dark .mobile-panel .text-secondary-foreground { color: oklch(0.95 0 0); }
+  .dark .mobile-panel .bg-secondary { background-color: oklch(0.28 0.006 285); }
+
+  /* Push directions panel below the search icon — compact */
+  .directions-panel {
+    bottom: auto;
+    top: 58px;
+    z-index: 22;
+    padding: 10px 14px;
+    min-width: auto;
+    animation: mobile-dir-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  /* Hide venue name, keep close button top-right */
+  .directions-panel__name { display: none; }
+  .directions-panel__header {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: auto;
+    justify-content: flex-end;
+  }
+  .directions-panel__modes { flex-wrap: wrap; justify-content: center; }
+  @keyframes mobile-dir-in {
+    from { opacity: 0; transform: translateX(-50%) translateY(-8px) scale(0.9); }
+    to   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+  }
+
+  /* Hide in-panel header (tabs moved to floating pill) */
+  .mobile-panel__header {
+    display: none;
+  }
+
+  /* Drag handle — floating knob overlapping the panel top */
+  .mobile-panel__drag-handle {
+    position: absolute;
+    top: -6px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 72px;
+    height: 36px;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+    border-radius: 18px;
+    transition: transform 0.15s ease;
+  }
+  .mobile-panel__drag-handle:active {
+    cursor: grabbing;
+    transform: translateX(-50%) scale(1.12);
+  }
+  .mobile-panel__drag-knob {
+    width: 40px;
+    height: 5px;
+    border-radius: 3px;
+    transition: width 0.15s ease, background 0.15s ease;
+  }
+  html:not(.dark) .mobile-panel__drag-knob {
+    background: oklch(0 0 0 / 0.12);
+  }
+  .dark .mobile-panel__drag-knob {
+    background: oklch(1 0 0 / 0.5);
+  }
+  .mobile-panel__drag-handle:active .mobile-panel__drag-knob {
+    width: 48px;
+  }
+  html:not(.dark) .mobile-panel__drag-handle:active .mobile-panel__drag-knob {
+    background: oklch(0 0 0 / 0.2);
+  }
+  .dark .mobile-panel__drag-handle:active .mobile-panel__drag-knob {
+    background: oklch(1 0 0 / 0.65);
+  }
+
+  /* ── Floating tab pill (above the panel) ─────────── */
+  .mobile-tab-pill {
+    display: flex;
+    position: fixed;
+    bottom: calc(52dvh + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 21;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 24px;
+    backdrop-filter: blur(40px) saturate(180%);
+    -webkit-backdrop-filter: blur(40px) saturate(180%);
+    transition: bottom 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .mobile-tab-pill--dragging {
+    transition: none !important;
+  }
+  html:not(.dark) .mobile-tab-pill {
+    background: oklch(1 0 0 / 0.8);
+    border: 1px solid oklch(0 0 0 / 0.08);
+    box-shadow: 0 2px 16px oklch(0 0 0 / 0.12);
+  }
+  .dark .mobile-tab-pill {
+    background: oklch(0.18 0.005 285 / 0.85);
+    border: 1px solid oklch(1 0 0 / 0.1);
+    box-shadow: 0 4px 20px oklch(0 0 0 / 0.3);
+  }
+
+  .mobile-tab-pill__btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 7px 16px;
+    border-radius: 20px;
+    border: none;
+    background: transparent;
+    font-size: 0.72rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+  html:not(.dark) .mobile-tab-pill__btn {
+    color: oklch(0.45 0 0);
+  }
+  .dark .mobile-tab-pill__btn {
+    color: oklch(0.7 0 0);
+  }
+
+  html:not(.dark) .mobile-tab-pill__btn--active {
+    background: oklch(1 0 0);
+    color: oklch(0.15 0 0);
+    box-shadow: 0 1px 6px oklch(0 0 0 / 0.1);
+  }
+  .dark .mobile-tab-pill__btn--active {
+    background: oklch(1 0 0 / 0.12);
+    color: oklch(1 0 0);
+    box-shadow: 0 1px 4px oklch(0 0 0 / 0.2);
+  }
+
+  /* Scrollable body */
+  .mobile-panel__body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+}
+
+/* ── Compact menu button & overlay (shared across breakpoints) ── */
+.mobile-menu-btn {
+  place-items: center;
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 25;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+}
+html:not(.dark) .mobile-menu-btn {
+  background: oklch(1 0 0 / 0.8);
+  border: 1px solid oklch(0 0 0 / 0.08);
+  box-shadow: 0 2px 12px oklch(0 0 0 / 0.12);
+  color: oklch(0.15 0.01 260);
+}
+.dark .mobile-menu-btn {
+  background: oklch(0.18 0.005 285 / 0.85);
+  border: 1px solid oklch(1 0 0 / 0.12);
+  box-shadow: 0 4px 20px oklch(0 0 0 / 0.3);
+  color: oklch(1 0 0);
+}
+.mobile-menu-btn:active {
+  transform: translateX(-50%) scale(0.92);
+}
+
+.mobile-menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+.mobile-menu-overlay--open {
+  opacity: 1;
+  pointer-events: auto;
+}
+.mobile-menu-overlay__backdrop {
+  position: absolute;
+  inset: 0;
+  background: oklch(0 0 0 / 0.3);
+}
+.dark .mobile-menu-overlay__backdrop {
+  background: oklch(0 0 0 / 0.5);
+}
+.mobile-menu-overlay__content {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%) scale(0.9);
+  transform-origin: top center;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 1rem;
+  min-width: 260px;
+  max-width: calc(100vw - 32px);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s;
+  opacity: 0;
+}
+.mobile-menu-overlay--open .mobile-menu-overlay__content {
+  transform: translateX(-50%) scale(1);
+  opacity: 1;
+}
+html:not(.dark) .mobile-menu-overlay__content {
+  background: oklch(1 0 0 / 0.92);
+  border: 1px solid oklch(0 0 0 / 0.08);
+  box-shadow: 0 8px 40px oklch(0 0 0 / 0.18);
+}
+.dark .mobile-menu-overlay__content {
+  background: oklch(0.16 0.005 285 / 0.95);
+  border: 1px solid oklch(1 0 0 / 0.12);
+  box-shadow: 0 8px 40px oklch(0 0 0 / 0.5);
+  color: oklch(1 0 0);
+}
+.mobile-menu-overlay__row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.mobile-menu-overlay__search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: oklch(0 0 0 / 0.06);
+}
+.dark .mobile-menu-overlay__search {
+  background: oklch(1 0 0 / 0.08);
+}
+.mobile-menu-overlay__theme {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 500;
+  transition: background 0.15s;
+  background: oklch(0 0 0 / 0.04);
+  color: var(--color-muted-foreground);
+}
+.mobile-menu-overlay__theme:hover {
+  background: oklch(0 0 0 / 0.08);
+}
+.dark .mobile-menu-overlay__theme {
+  background: oklch(1 0 0 / 0.06);
+  color: oklch(0.85 0 0);
+}
+.dark .mobile-menu-overlay__theme:hover {
+  background: oklch(1 0 0 / 0.1);
 }

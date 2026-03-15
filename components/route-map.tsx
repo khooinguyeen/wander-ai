@@ -27,9 +27,11 @@ type RouteMapProps = {
   selectedVenueId: string | null;
   onSelectStop: (id: string) => void;
   onSelectVenue: (id: string) => void;
+  onDeselectVenue?: () => void;
   startLocation: string;
   travelMode: TravelMode;
   colorScheme?: "DARK" | "LIGHT";
+  isPlanning?: boolean;
 };
 
 function travelModeToGoogle(mode: TravelMode): google.maps.TravelMode {
@@ -45,9 +47,11 @@ function travelModeToGoogle(mode: TravelMode): google.maps.TravelMode {
 
 function AnimatedRouteRenderer({
   stops,
+  startLocation,
   travelMode
 }: {
   stops: PlannedStop[];
+  startLocation?: string;
   travelMode: TravelMode;
 }) {
   const map = useMap();
@@ -72,14 +76,8 @@ function AnimatedRouteRenderer({
 
     service.route(
       {
-        origin: new google.maps.LatLng(
-          stops[0].spot.coordinates.lat,
-          stops[0].spot.coordinates.lng
-        ),
-        destination: new google.maps.LatLng(
-          stops[stops.length - 1].spot.coordinates.lat,
-          stops[stops.length - 1].spot.coordinates.lng
-        ),
+        origin,
+        destination,
         waypoints,
         travelMode: travelModeToGoogle(travelMode)
       },
@@ -139,7 +137,81 @@ function AnimatedRouteRenderer({
       if (glowRef.current) { glowRef.current.setMap(null); glowRef.current = null; }
       if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
     };
-  }, [map, routesLib, stops, travelMode]);
+  }, [map, routesLib, stops, startLocation, travelMode]);
+
+  return null;
+}
+
+/** During planning: show a single preview route through the filtered venues
+ *  using nearest-neighbour ordering. Uses lat/lng to avoid geocoding errors. */
+function RoutePlanningPreview({
+  venues,
+  travelMode,
+}: {
+  venues: Venue[];
+  startLocation: string;
+  travelMode: TravelMode;
+}) {
+  const map = useMap();
+  const routesLib = useMapsLibrary("routes");
+  const rendererRef = useRef<google.maps.DirectionsRenderer | null>(null);
+
+  useEffect(() => {
+    if (!map || !routesLib || venues.length < 2) {
+      if (rendererRef.current) { rendererRef.current.setMap(null); rendererRef.current = null; }
+      return;
+    }
+
+    // Order venues by nearest-neighbour starting from the first
+    const ordered: Venue[] = [];
+    const remaining = [...venues];
+    let current = remaining.shift()!;
+    ordered.push(current);
+    while (remaining.length > 0) {
+      let nearest = 0;
+      let nearestDist = Infinity;
+      for (let j = 0; j < remaining.length; j++) {
+        const d = Math.hypot(remaining[j].lat - current.lat, remaining[j].lng - current.lng);
+        if (d < nearestDist) { nearestDist = d; nearest = j; }
+      }
+      current = remaining.splice(nearest, 1)[0];
+      ordered.push(current);
+    }
+
+    const renderer = new routesLib.DirectionsRenderer({
+      map,
+      suppressMarkers: true,
+      polylineOptions: {
+        strokeColor: "#4f8cf9",
+        strokeWeight: 4,
+        strokeOpacity: 0.5,
+        zIndex: 5,
+      },
+    });
+    rendererRef.current = renderer;
+
+    const service = new routesLib.DirectionsService();
+    const origin = new google.maps.LatLng(ordered[0].lat, ordered[0].lng);
+    const dest = new google.maps.LatLng(ordered[ordered.length - 1].lat, ordered[ordered.length - 1].lng);
+    const waypoints = ordered.slice(1, -1).map(v => ({
+      location: new google.maps.LatLng(v.lat, v.lng),
+      stopover: true,
+    }));
+
+    service.route(
+      { origin, destination: dest, waypoints, travelMode: travelModeToGoogle(travelMode) },
+      (result, status) => {
+        if (status === google.maps.DirectionsStatus.OK && result) {
+          renderer.setDirections(result);
+        }
+      }
+    );
+
+    return () => {
+      renderer.setMap(null);
+      rendererRef.current = null;
+    };
+  }, [map, routesLib, venues, travelMode]);
 
   return null;
 }
@@ -215,7 +287,7 @@ const VENUE_CATEGORY_COLORS: Record<string, string> = {
   other: "#6b7280",
 };
 
-import { UtensilsCrossed, Coffee, Wine, MapPin, Navigation, X } from "lucide-react";
+import { UtensilsCrossed, Coffee, Wine, MapPin, Navigation, ShoppingBag, X } from "lucide-react";
 import type { ReactNode } from "react";
 
 type ModeInfo = { distance: string; duration: string };
@@ -344,7 +416,7 @@ const VENUE_CATEGORY_ICON: Record<string, ReactNode> = {
   cafe: <Coffee size={14} strokeWidth={2.5} color="#fff" />,
   bar: <Wine size={14} strokeWidth={2.5} color="#fff" />,
   attraction: <MapPin size={14} strokeWidth={2.5} color="#fff" />,
-  shopping: <MapPin size={14} strokeWidth={2.5} color="#fff" />,
+  shopping: <ShoppingBag size={14} strokeWidth={2.5} color="#fff" />,
   other: <MapPin size={14} strokeWidth={2.5} color="#fff" />,
 };
 
@@ -358,23 +430,26 @@ function GoogleMapInner({
   selectedVenueId,
   onSelectStop,
   onSelectVenue,
+  onDeselectVenue,
+  startLocation,
   travelMode,
-  colorScheme = "DARK"
+  colorScheme = "DARK",
+  isPlanning = false
 }: RouteMapProps) {
   const hasStops = stops.length > 0;
   const hasVenues = venues.length > 0;
   const [showDirections, setShowDirections] = useState(false);
   const [routeInfo, setRouteInfo] = useState<AllRouteInfo | null>(null);
 
-  // Selected venue/stop name
+  // Selected venue/stop name + category
   const selectedEntity = useMemo(() => {
     if (activeStopId && hasStops) {
       const stop = stops.find((s) => s.spot.id === activeStopId);
-      if (stop) return { name: stop.spot.name };
+      if (stop) return { name: stop.spot.name, category: stop.spot.kind ?? "other" };
     }
     if (selectedVenueId && hasVenues) {
       const venue = venues.find((v) => v.id === selectedVenueId);
-      if (venue) return { name: venue.name };
+      if (venue) return { name: venue.name, category: venue.uiCategory ?? "other" };
     }
     return null;
   }, [activeStopId, selectedVenueId, stops, venues, hasStops, hasVenues]);
@@ -432,6 +507,7 @@ function GoogleMapInner({
       streetViewControl={false}
       fullscreenControl={false}
       style={{ width: "100%", height: "100%" }}
+      onClick={() => onDeselectVenue?.()}
     >
       <FitBounds stops={stops} previewSpots={previewSpots} venues={venues} />
 
@@ -504,12 +580,40 @@ function GoogleMapInner({
             })
           : previewSpots.slice(0, 20).map((spot) => (
               <AdvancedMarker
-                key={spot.id}
-                position={{ lat: spot.coordinates.lat, lng: spot.coordinates.lng }}
+                key={stop.spot.id}
+                position={{
+                  lat: stop.spot.coordinates.lat,
+                  lng: stop.spot.coordinates.lng
+                }}
+                onClick={() => onSelectStop(stop.spot.id)}
+                zIndex={activeStopId === stop.spot.id ? 100 : 10}
+                style={{ overflow: "visible" }}
               >
-                <div className="pill-marker pill-marker--preview" />
+                <div
+                  className={`pill-marker pill-marker--stop ${activeStopId === stop.spot.id ? "pill-marker--expanded" : ""}`}
+                >
+                  <span className="pill-marker__num">{i + 1}</span>
+                  {activeStopId === stop.spot.id && (
+                    <span className="pill-marker__label">{stop.spot.name}</span>
+                  )}
+                </div>
               </AdvancedMarker>
-            ))}
+            ))
+          : hasVenues
+            ? <ClusteredVenueMarkers
+                venues={venues}
+                selectedVenueId={selectedVenueId}
+                onSelectVenue={onSelectVenue}
+              />
+            : previewSpots.slice(0, 20).map((spot) => (
+                <AdvancedMarker
+                  key={spot.id}
+                  position={{ lat: spot.coordinates.lat, lng: spot.coordinates.lng }}
+                >
+                  <div className="pill-marker pill-marker--preview" />
+                </AdvancedMarker>
+              ))
+      )}
     </Map>
 
     {/* Bottom info panel — shows when a location is selected */}
@@ -517,7 +621,7 @@ function GoogleMapInner({
       <div className="directions-panel">
         <div className="directions-panel__header">
           <span className="directions-panel__name">{selectedEntity.name}</span>
-          {showDirections && (
+          {showDirections && routeInfo && (
             <button type="button" className="directions-panel__close" onClick={handleCloseDirections}>
               <X size={14} />
             </button>
