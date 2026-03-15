@@ -22,7 +22,7 @@ const jetBrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Scout Map",
+  title: "Mappy",
   description: "Map-first Melbourne route planner with chat-driven itinerary building."
 };
 
