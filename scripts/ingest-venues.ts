@@ -6,13 +6,13 @@ import * as path from "path";
 config({ path: ".env.local" });
 
 // ── Usage ──────────────────────────────────────────────────────
-// npx tsx scripts/seed-chroma.ts data/seed/venues.json
-// npx tsx scripts/seed-chroma.ts data/seed/tiktok.json data/seed/instagram.json
+// npx tsx scripts/ingest-venues.ts data/seed/venues.json
+// npx tsx scripts/ingest-venues.ts data/seed/tiktok.json data/seed/instagram.json
 
 const inputFiles = process.argv.slice(2);
 if (inputFiles.length === 0) {
   console.error("❌ No input files provided.");
-  console.error("Usage: npx tsx scripts/seed-chroma.ts <file1.json> [file2.json] ...");
+  console.error("Usage: npx tsx scripts/ingest-venues.ts <file1.json> [file2.json] ...");
   process.exit(1);
 }
 
@@ -52,7 +52,6 @@ interface Venue {
 
 // ── Helpers ────────────────────────────────────────────────────
 
-// Merge source_urls from two venues with same google_place_id
 function mergeSourceUrls(existing: string, incoming: string): string {
   const existingUrls: string[] = JSON.parse(existing || "[]");
   const incomingUrls: string[] = JSON.parse(incoming || "[]");
@@ -60,7 +59,6 @@ function mergeSourceUrls(existing: string, incoming: string): string {
   return JSON.stringify(merged);
 }
 
-// Validate required fields — skip venue if missing
 function isValid(venue: Venue): boolean {
   if (!venue.name) {
     console.warn(`⚠️  Skipping venue with no name`);
@@ -77,7 +75,6 @@ function isValid(venue: Venue): boolean {
   return true;
 }
 
-// Build the document text that gets embedded as a vector
 function buildDocument(venue: Venue): string {
   return [
     venue.name,
@@ -89,10 +86,19 @@ function buildDocument(venue: Venue): string {
   ].join(". ");
 }
 
+function toMetadata(venue: Venue) {
+  const { description: _desc, ...rest } = venue;
+  return {
+    ...rest,
+    price_level: rest.price_level ?? -1,
+    google_rating: rest.google_rating ?? -1,
+    google_rating_count: rest.google_rating_count ?? -1,
+  };
+}
+
 // ── Main ───────────────────────────────────────────────────────
 async function seed() {
-  // 1. Load and merge all input files
-  // Key = google_place_id, value = venue (deduplicated)
+  // 1. Load and deduplicate across input files
   const venueMap = new Map<string, Venue>();
 
   for (const filePath of inputFiles) {
@@ -110,8 +116,7 @@ async function seed() {
 
       const existing = venueMap.get(venue.google_place_id);
       if (existing) {
-        // Duplicate found — merge source_urls, keep everything else from existing
-        console.log(`🔀 Duplicate found: "${venue.name}" — merging source_urls`);
+        console.log(`🔀 Duplicate in files: "${venue.name}" — merging source_urls`);
         existing.source_urls = mergeSourceUrls(existing.source_urls, venue.source_urls);
       } else {
         venueMap.set(venue.google_place_id, { ...venue });
@@ -120,10 +125,10 @@ async function seed() {
   }
 
   const venues = Array.from(venueMap.values());
-  console.log(`\n📊 Total unique venues to seed: ${venues.length}`);
+  console.log(`\n📊 Total unique venues to process: ${venues.length}`);
 
   if (venues.length === 0) {
-    console.error("❌ No valid venues to seed.");
+    console.error("❌ No valid venues to ingest.");
     process.exit(1);
   }
 
@@ -139,43 +144,53 @@ async function seed() {
 
   // 3. Check which place_ids already exist in Chroma
   const incomingIds = venues.map((v) => v.google_place_id);
-  const existing = await collection.get({ ids: incomingIds });
-  const existingIds = new Set(existing.ids);
+  const existingResult = await collection.get({ ids: incomingIds });
+  const existingIds = new Set(existingResult.ids);
 
-  const toAdd = venues.filter((v) => !existingIds.has(v.google_place_id));
-  const toUpdate = venues.filter((v) => existingIds.has(v.google_place_id));
+  const toAdd    = venues.filter((v) => !existingIds.has(v.google_place_id));
+  const toUpdate = venues.filter((v) =>  existingIds.has(v.google_place_id));
 
   // 4. Add new venues
   if (toAdd.length > 0) {
     await collection.add({
-      ids: toAdd.map((v) => v.google_place_id),
+      ids:       toAdd.map((v) => v.google_place_id),
       documents: toAdd.map(buildDocument),
-      metadatas: toAdd.map(({ description: _desc, ...rest }) => ({
-        ...rest,
-        price_level: rest.price_level ?? -1,
-        google_rating: rest.google_rating ?? -1,
-        google_rating_count: rest.google_rating_count ?? -1,
-      })),
+      metadatas: toAdd.map(toMetadata),
     });
     console.log(`✅ Added ${toAdd.length} new venues`);
   }
 
-  // 5. Update existing venues (merge source_urls)
+  // 5. Update existing venues — fetch old source_urls from Chroma first, then merge
   if (toUpdate.length > 0) {
-    await collection.update({
+    const oldData = await collection.get({
       ids: toUpdate.map((v) => v.google_place_id),
-      documents: toUpdate.map(buildDocument),
-      metadatas: toUpdate.map(({ description: _desc, ...rest }) => ({
-        ...rest,
-        price_level: rest.price_level ?? -1,
-        google_rating: rest.google_rating ?? -1,
-        google_rating_count: rest.google_rating_count ?? -1,
-      })),
     });
-    console.log(`🔄 Updated ${toUpdate.length} existing venues`);
+
+    // Build a map of place_id → old source_urls
+    const oldSourceUrlsMap = new Map<string, string>();
+    oldData.ids.forEach((id, i) => {
+      const meta = oldData.metadatas[i] as Record<string, string>;
+      oldSourceUrlsMap.set(id, meta?.source_urls ?? "[]");
+    });
+
+    // Merge old source_urls with incoming
+    const mergedVenues = toUpdate.map((v) => ({
+      ...v,
+      source_urls: mergeSourceUrls(
+        oldSourceUrlsMap.get(v.google_place_id) ?? "[]",
+        v.source_urls
+      ),
+    }));
+
+    await collection.update({
+      ids:       mergedVenues.map((v) => v.google_place_id),
+      documents: mergedVenues.map(buildDocument),
+      metadatas: mergedVenues.map(toMetadata),
+    });
+    console.log(`🔄 Updated ${toUpdate.length} existing venues (source_urls merged)`);
   }
 
-  console.log(`\n🎉 Done! Collection now has venues from ${inputFiles.length} file(s).`);
+  console.log(`\n🎉 Done! Ingested from ${inputFiles.length} file(s).`);
 }
 
 seed().catch(console.error);
