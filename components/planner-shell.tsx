@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Markdown from "react-markdown";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useTheme } from "next-themes";
@@ -127,18 +128,14 @@ const PLATFORMS: { value: Platform; icon: React.ReactNode }[] = [
 ];
 
 const SUGGESTIONS = [
-  "lowkey northside day with coffee and a lookout",
-  "southside brunch then sunset for a date",
-  "CBD fashion and food route for a visitor",
-  "show me hidden cafes near Fitzroy",
-  "best date night spots in the city",
-  "plan a food crawl through Richmond",
-  "vintage shopping and coffee in Collingwood",
-  "scenic walk with a good brunch stop",
-  "where's good for sunset drinks tonight?",
-  "surprise me with something local and vibes",
-  "chill Saturday morning — coffee and pastries",
-  "rooftop bars and late-night eats",
+  "Find me some cool places",
+  "Plan my day out",
+  "Show me hidden gems",
+  "I need brunch spots",
+  "Best cafes nearby",
+  "Build me a date day",
+  "Where's good for sunset?",
+  "Surprise me with something fun",
 ];
 
 const PLACEHOLDERS = [
@@ -154,19 +151,44 @@ const PLACEHOLDERS = [
   "Build me the perfect Saturday...",
 ];
 
-const WELCOME_PROMPTS_ROUTE = [
-  "Hey! What kind of day are you planning? Give me the vibe — brunch crawl, date day, shopping + coffee, whatever you're feeling.",
-  "G'day! Planning a Melbourne day out? Tell me what you're in the mood for and I'll sort a route.",
-  "What's the plan for today? Coffee and lookouts, food crawl, fashion stops — give me something to work with.",
-  "Alright, let's build you a day. What are you keen for — lowkey eats, a shopping loop, sunset vibes?",
-  "Hey! Where are we headed today? Drop me a vibe and I'll put together the route.",
-  "Ready to plan something good. What's the brief — brunch and shopping, date day, local hidden gems?",
-  "What sort of day are we building? Tell me the vibe and I'll find the spots.",
-  "Let's get into it. What are you after today — food, fashion, scenic stuff, or a mix of everything?"
+const welcomeMsgS = [
+  "Hey! Are you looking to find some cool places, or plan out your day?",
+  "G'day! Want to discover somewhere new, or plan a full day out?",
+  "Hey there! Keen to explore some spots, or want me to plan your day?",
+  "What's the vibe — browsing for cool places, or planning a whole day out?",
+  "Hey! Looking to find some gems, or want me to map out your day?",
+  "Alright, what are we doing — finding cool spots or building a day plan?",
+  "Hey! Want to explore what's around, or plan out where to go today?",
+  "G'day! Are we hunting for places, or planning the full route today?",
 ];
 
 function getRandomWelcome() {
-  return WELCOME_PROMPTS_ROUTE[Math.floor(Math.random() * WELCOME_PROMPTS_ROUTE.length)];
+  return welcomeMsgS[Math.floor(Math.random() * welcomeMsgS.length)];
+}
+
+/* ── Markdown renderer for chat messages ─────────────────── */
+function ChatMd({ children, className }: { children: string; className?: string }) {
+  return (
+    <div className={cn("chat-md", className)}>
+      <Markdown
+        components={{
+          p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+          strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+          em: ({ children }) => <em>{children}</em>,
+          ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-1">{children}</ul>,
+          ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-1">{children}</ol>,
+          li: ({ children }) => <li>{children}</li>,
+          a: ({ href, children }) => (
+            <a href={href} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2 hover:text-primary/80">
+              {children}
+            </a>
+          ),
+        }}
+      >
+        {children}
+      </Markdown>
+    </div>
+  );
 }
 
 /* ── helpers ───────────────────────────────────────────────── */
@@ -770,18 +792,155 @@ function PanelOpenButton({
   );
 }
 
+/* ── Route building animation ──────────────────────────────── */
+
+/** Animated dots-and-lines that simulate a route being optimised in real time.
+ *  Pure SVG — no map dependency. Uses a handful of fixed "city" dots and
+ *  cycles through different connection orders to mimic route-finding. */
+function RouteAnimation({ className }: { className?: string }) {
+  const canvasRef = useRef<SVGSVGElement>(null);
+  const frameRef = useRef(0);
+  const phaseRef = useRef(0);
+
+  // Fixed node positions that loosely resemble Melbourne CBD/inner suburbs layout
+  const nodes = useMemo(() => [
+    { x: 50, y: 18 },   // top-center (Carlton)
+    { x: 78, y: 28 },   // top-right (Fitzroy)
+    { x: 88, y: 52 },   // mid-right (Richmond)
+    { x: 72, y: 78 },   // bottom-right (South Yarra)
+    { x: 42, y: 85 },   // bottom-center (South Melbourne)
+    { x: 18, y: 65 },   // left (Docklands)
+    { x: 22, y: 38 },   // top-left (North Melbourne)
+    { x: 55, y: 50 },   // center (CBD)
+  ], []);
+
+  // Pre-computed route orders (different "attempts" the algorithm tries)
+  const routes = useMemo(() => [
+    [7, 0, 1, 2, 3, 4, 5, 6],  // clockwise from CBD
+    [7, 6, 0, 1, 2, 3, 4, 5],  // start north-west
+    [7, 1, 0, 6, 5, 4, 3, 2],  // counter-clockwise
+    [7, 2, 3, 4, 5, 6, 0, 1],  // start east
+    [7, 5, 6, 0, 1, 2, 3, 4],  // start west
+    [7, 0, 2, 4, 6, 1, 3, 5],  // zigzag
+  ], []);
+
+  useEffect(() => {
+    const svg = canvasRef.current;
+    if (!svg) return;
+
+    let animId: number;
+    let startTime = performance.now();
+    const PHASE_DURATION = 2200; // ms per route attempt
+    const DRAW_DURATION = 1600; // ms to draw all lines in a phase
+
+    const animate = (now: number) => {
+      const elapsed = now - startTime;
+      const phase = Math.floor(elapsed / PHASE_DURATION) % routes.length;
+      const phaseProgress = (elapsed % PHASE_DURATION) / PHASE_DURATION;
+      const drawProgress = Math.min(1, (elapsed % PHASE_DURATION) / DRAW_DURATION);
+
+      const route = routes[phase];
+      const isLastPhase = phase === routes.length - 1;
+
+      // Build SVG content
+      let html = "";
+
+      // Draw nodes (dots)
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i];
+        const isCenter = i === 7;
+        const nodeInRoute = route.indexOf(i);
+        const nodeProgress = nodeInRoute >= 0 ? nodeInRoute / (route.length - 1) : -1;
+        const visible = nodeProgress <= drawProgress;
+
+        if (visible) {
+          const scale = isCenter ? 1.3 : 1;
+          const opacity = isCenter ? 1 : (0.5 + drawProgress * 0.5);
+          const r = isCenter ? 4.5 : 3;
+
+          // Glow for center node
+          if (isCenter) {
+            html += `<circle cx="${n.x}" cy="${n.y}" r="10" fill="oklch(0.65 0.16 255 / 0.12)" class="route-anim-pulse" />`;
+          }
+
+          html += `<circle cx="${n.x}" cy="${n.y}" r="${r * scale}" fill="oklch(0.65 0.16 255 / ${opacity})" />`;
+
+          // Small label dot ring for visited nodes
+          if (!isCenter && nodeProgress < drawProgress) {
+            html += `<circle cx="${n.x}" cy="${n.y}" r="${r * scale + 2.5}" fill="none" stroke="oklch(0.65 0.16 255 / ${opacity * 0.3})" stroke-width="1" />`;
+          }
+        }
+      }
+
+      // Draw connecting lines
+      for (let i = 0; i < route.length - 1; i++) {
+        const segProgress = (drawProgress * (route.length - 1) - i);
+        if (segProgress <= 0) continue;
+
+        const from = nodes[route[i]];
+        const to = nodes[route[i + 1]];
+        const t = Math.min(1, segProgress);
+
+        const x2 = from.x + (to.x - from.x) * t;
+        const y2 = from.y + (to.y - from.y) * t;
+
+        const isFinal = isLastPhase && phaseProgress > 0.8;
+        const lineOpacity = isFinal ? 0.7 : (0.2 + t * 0.3);
+        const lineColor = isFinal
+          ? `oklch(0.7 0.18 150 / ${lineOpacity})`
+          : `oklch(0.65 0.16 255 / ${lineOpacity})`;
+
+        html += `<line x1="${from.x}" y1="${from.y}" x2="${x2}" y2="${y2}" stroke="${lineColor}" stroke-width="${isFinal ? 2.5 : 1.5}" stroke-linecap="round" />`;
+
+        // Animated travel dot along the line
+        if (t > 0.1 && t < 0.95) {
+          const dotT = (t * 3) % 1;
+          const dx = from.x + (to.x - from.x) * dotT;
+          const dy = from.y + (to.y - from.y) * dotT;
+          html += `<circle cx="${dx}" cy="${dy}" r="2" fill="oklch(0.8 0.16 255 / 0.8)" />`;
+        }
+      }
+
+      svg.innerHTML = html;
+      animId = requestAnimationFrame(animate);
+    };
+
+    animId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(animId);
+  }, [nodes, routes]);
+
+  return (
+    <svg
+      ref={canvasRef}
+      viewBox="0 0 100 100"
+      className={cn("route-build-anim", className)}
+      style={{ width: "100%", maxWidth: 280, aspectRatio: "1" }}
+    />
+  );
+}
+
 /* ── Stop card ─────────────────────────────────────────────── */
 function StopCard({
   stop,
   index,
   active,
-  onSelect
+  onSelect,
+  startLocation
 }: {
   stop: PlannedStop;
   index: number;
   active: boolean;
   onSelect: (id: string) => void;
+  startLocation?: string;
 }) {
+  const legLabel = index === 0 && startLocation
+    ? stop.legFromPreviousMinutes > 0
+      ? `${stop.legFromPreviousMinutes} min from ${startLocation}`
+      : `From ${startLocation}`
+    : stop.legFromPreviousMinutes > 0
+      ? `${stop.legFromPreviousMinutes} min · ${stop.legDistanceKm} km`
+      : "Route start";
+
   return (
     <button
       type="button"
@@ -802,9 +961,7 @@ function StopCard({
             {stop.arrivalTime}
           </span>
           <span className="text-xs text-muted-foreground">
-            {stop.legFromPreviousMinutes > 0
-              ? `${stop.legFromPreviousMinutes} min · ${stop.legDistanceKm} km`
-              : "Route start"}
+            {legLabel}
           </span>
         </div>
         <h3 className="text-[0.85rem] font-semibold truncate">{stop.spot.name}</h3>
@@ -826,7 +983,7 @@ export function PlannerShell() {
   const [welcomeMsg] = useState(() => getRandomWelcome());
   const [shownSuggestions, setShownSuggestions] = useState(() => {
     const shuffled = [...SUGGESTIONS].sort(() => Math.random() - 0.5);
-    return shuffled.slice(0, 3);
+    return shuffled.slice(0, 4);
   });
   const [input, setInput] = useState("");
   const [activeCategories, setActiveCategories] = useState<Set<CategoryValue>>(new Set());
@@ -1048,17 +1205,29 @@ export function PlannerShell() {
   }, [messages]);
 
   // Apply AI filter tool results to the venue list
+  const lastAppliedFilterRef = useRef<string | null>(null);
   useEffect(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       for (const part of messages[i].parts) {
         const p = part as Record<string, unknown>;
         const isFilter = (p.type === "tool-filterPlaces") ||
           (p.type === "dynamic-tool" && p.toolName === "filterPlaces");
-        if (isFilter && p.state === "output-available" && p.output) {
+        if (!isFilter) continue;
+
+        // Tool is loading — clear old results so stale markers disappear
+        if (p.state === "input-available" || p.state === "input-streaming") {
+          setAiFilteredIds(null);
+          return;
+        }
+
+        if (p.state === "output-available" && p.output) {
+          // Only apply each result once to prevent re-render flicker
+          const resultKey = `${messages[i].id}-${i}`;
+          if (lastAppliedFilterRef.current === resultKey) return;
+          lastAppliedFilterRef.current = resultKey;
+
           const out = p.output as { venueIds?: string[]; searchQuery?: string };
-          if (out.venueIds && out.venueIds.length > 0) {
-            setAiFilteredIds(new Set(out.venueIds));
-          }
+          setAiFilteredIds(out.venueIds?.length ? new Set(out.venueIds) : null);
           setVenueSearch("");
           setActiveCategories(new Set());
           setAiFilterActive(true);
@@ -1158,7 +1327,7 @@ export function PlannerShell() {
     setAiFilteredIds(null);
     setSelectedVenueId(null);
     setMobileMenuOpen(false);
-    setShownSuggestions([...SUGGESTIONS].sort(() => Math.random() - 0.5).slice(0, 3));
+    setShownSuggestions([...SUGGESTIONS].sort(() => Math.random() - 0.5).slice(0, 4));
   }, [welcomeMsg, setMessages]);
 
   return (
@@ -1314,6 +1483,7 @@ export function PlannerShell() {
                         index={i}
                         active={activeStop?.spot.id === s.spot.id}
                         onSelect={setActiveStopId}
+                        startLocation={startLocation}
                       />
                     ))}
                   </div>
@@ -1378,21 +1548,14 @@ export function PlannerShell() {
                 </Button>
               </>
             ) : isPlanning ? (
-              <div className="grid gap-5 py-10 justify-items-center text-center">
-                <div className="grid place-items-center size-14 rounded-2xl bg-primary/15 text-primary animate-pulse">
-                  <Route className="size-6" />
-                </div>
+              <div className="grid gap-4 py-6 justify-items-center text-center">
+                <RouteAnimation />
                 <div className="space-y-2">
                   <h2 className="heading-serif text-lg">Building your route</h2>
                   <p className="text-[0.85rem] text-muted-foreground leading-[1.7] max-w-[260px]">
                     Searching {venues.length}+ spots, ranking matches,
                     and projecting the best sequence...
                   </p>
-                </div>
-                <div className="flex gap-1.5 mt-2">
-                  <span className="planning-dot size-2 rounded-full bg-primary/60" />
-                  <span className="planning-dot size-2 rounded-full bg-primary/60" style={{ animationDelay: "0.2s" }} />
-                  <span className="planning-dot size-2 rounded-full bg-primary/60" style={{ animationDelay: "0.4s" }} />
                 </div>
               </div>
             ) : (
@@ -1474,14 +1637,15 @@ export function PlannerShell() {
                     </div>
                   ) : (
                     <div className="min-w-0 flex-1">
-                      <p className={cn(
-                        "text-[15px] leading-[1.7] text-foreground",
-                        m.id === "welcome" && introPhase === "typing" && "intro-typewriter"
-                      )}>
-                        {m.id === "welcome" && introPhase === "typing"
-                          ? welcomeMsg.slice(0, typedChars)
-                          : getMessageText(m)}
-                      </p>
+                      {m.id === "welcome" && introPhase === "typing" ? (
+                        <p className="text-[15px] leading-[1.7] text-foreground intro-typewriter">
+                          {welcomeMsg.slice(0, typedChars)}
+                        </p>
+                      ) : (
+                        <ChatMd className="text-[15px] leading-[1.7] text-foreground">
+                          {getMessageText(m)}
+                        </ChatMd>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1705,7 +1869,7 @@ export function PlannerShell() {
                     </Card>
                     <div className="space-y-2">
                       {itinerary.stops.map((s, i) => (
-                        <StopCard key={s.spot.id} stop={s} index={i} active={activeStop?.spot.id === s.spot.id} onSelect={setActiveStopId} />
+                        <StopCard key={s.spot.id} stop={s} index={i} active={activeStop?.spot.id === s.spot.id} onSelect={setActiveStopId} startLocation={startLocation} />
                       ))}
                     </div>
                     <Button size="sm" className="w-full rounded-xl" asChild>
@@ -1715,10 +1879,8 @@ export function PlannerShell() {
                     </Button>
                   </>
                 ) : isPlanning ? (
-                  <div className="grid gap-4 py-6 justify-items-center text-center">
-                    <div className="grid place-items-center size-12 rounded-2xl bg-primary/15 text-primary animate-pulse">
-                      <Route className="size-5" />
-                    </div>
+                  <div className="grid gap-3 py-4 justify-items-center text-center">
+                    <RouteAnimation className="max-w-[200px]" />
                     <p className="text-[0.85rem] text-muted-foreground">Building your route...</p>
                   </div>
                 ) : (
@@ -1764,7 +1926,9 @@ export function PlannerShell() {
                           <AgentIcon className="size-5" />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="text-[14px] leading-[1.7] text-foreground">{getMessageText(m)}</p>
+                          <ChatMd className="text-[14px] leading-[1.7] text-foreground">
+                            {getMessageText(m)}
+                          </ChatMd>
                         </div>
                       </div>
                     );

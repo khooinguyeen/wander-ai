@@ -46,9 +46,11 @@ function travelModeToGoogle(mode: TravelMode): google.maps.TravelMode {
 
 function DirectionsRenderer({
   stops,
+  startLocation,
   travelMode
 }: {
   stops: PlannedStop[];
+  startLocation?: string;
   travelMode: TravelMode;
 }) {
   const map = useMap();
@@ -56,7 +58,7 @@ function DirectionsRenderer({
   const rendererRef = useRef<google.maps.DirectionsRenderer | null>(null);
 
   useEffect(() => {
-    if (!map || !routesLib || stops.length < 2) {
+    if (!map || !routesLib || stops.length < 1) {
       if (rendererRef.current) {
         rendererRef.current.setMap(null);
         rendererRef.current = null;
@@ -77,21 +79,30 @@ function DirectionsRenderer({
 
     rendererRef.current = renderer;
 
-    const waypoints = stops.slice(1, -1).map((s) => ({
+    // Use start location as origin if provided, otherwise first stop
+    const origin = startLocation
+      ? startLocation
+      : new google.maps.LatLng(
+          stops[0].spot.coordinates.lat,
+          stops[0].spot.coordinates.lng
+        );
+
+    const destination = new google.maps.LatLng(
+      stops[stops.length - 1].spot.coordinates.lat,
+      stops[stops.length - 1].spot.coordinates.lng
+    );
+
+    // All stops except the last become waypoints (including the first if we have a startLocation)
+    const waypointStops = startLocation ? stops.slice(0, -1) : stops.slice(1, -1);
+    const waypoints = waypointStops.map((s) => ({
       location: new google.maps.LatLng(s.spot.coordinates.lat, s.spot.coordinates.lng),
       stopover: true
     }));
 
     service.route(
       {
-        origin: new google.maps.LatLng(
-          stops[0].spot.coordinates.lat,
-          stops[0].spot.coordinates.lng
-        ),
-        destination: new google.maps.LatLng(
-          stops[stops.length - 1].spot.coordinates.lat,
-          stops[stops.length - 1].spot.coordinates.lng
-        ),
+        origin,
+        destination,
         waypoints,
         travelMode: travelModeToGoogle(travelMode)
       },
@@ -105,7 +116,7 @@ function DirectionsRenderer({
     return () => {
       renderer.setMap(null);
     };
-  }, [map, routesLib, stops, travelMode]);
+  }, [map, routesLib, stops, startLocation, travelMode]);
 
   return null;
 }
@@ -520,6 +531,7 @@ function GoogleMapInner({
   onSelectStop,
   onSelectVenue,
   onDeselectVenue,
+  startLocation,
   travelMode,
   colorScheme = "DARK"
 }: RouteMapProps) {
@@ -644,7 +656,7 @@ function GoogleMapInner({
         </AdvancedMarker>
       )}
 
-      {hasStops && <DirectionsRenderer stops={stops} travelMode={travelMode} />}
+      {hasStops && <DirectionsRenderer stops={stops} startLocation={startLocation} travelMode={travelMode} />}
 
       {/* Hide all other markers when directions are active */}
       {!showDirections && (

@@ -38,12 +38,18 @@ const PLANNER_SYSTEM = `You are a Melbourne route planner agent. Your job is to 
 ## Your process
 1. First, call searchSpots to find candidates matching the user's vibe.
 2. Review the results. Think about what mix of spots makes a great day.
-3. Call getDirections between your planned stops to check real travel times.
-4. If a leg is too long (>30 min walking, >20 min driving), consider reordering or swapping a spot.
-5. Once you're happy with the plan, call finalizePlan with your final selection.
+3. Plan the optimal stop order:
+   a. Start from the user's startLocation.
+   b. Pick the nearest unvisited spot as the first stop.
+   c. From each stop, pick the nearest remaining spot — like a nearest-neighbour route.
+   d. This avoids zigzagging across the city.
+4. Call getDirections from the startLocation to the first stop, then between each consecutive pair of stops, to get real travel times.
+5. If a leg is too long (>30 min walking, >20 min driving), consider swapping or reordering.
+6. Once you're happy, call finalizePlan with your final ordered selection.
 
 ## Planning rules
-- Keep the route geographically compact — don't zigzag across the city.
+- ALWAYS order stops to minimise total travel time from the startLocation. The first stop should be the closest to the start.
+- Keep the route geographically compact — follow a logical path through nearby suburbs, don't bounce around.
 - Respect visit windows — don't schedule a brunch spot at 5 PM.
 - Mix up stop kinds when the user's vibe calls for variety.
 - If the user says "lowkey" or "hidden", favor spots with high hiddenGem signals.
@@ -53,7 +59,7 @@ const PLANNER_SYSTEM = `You are a Melbourne route planner agent. Your job is to 
 
 ## Important
 - You can call searchSpots multiple times with different queries to find the right mix.
-- You MUST call getDirections at least once to validate travel times between consecutive stops.
+- You MUST call getDirections from the startLocation to the first stop AND between all consecutive stops to validate travel times.
 - You MUST call finalizePlan exactly once at the end with your final plan.`;
 
 /* ── build itinerary using Gemini agent ─────────────────────── */
@@ -178,7 +184,32 @@ async function assemblePlan(
     let legDistanceKm = 0;
     let legMinutes = 0;
 
-    if (i > 0) {
+    if (i === 0 && request.startLocation) {
+      // Leg from start location to first stop
+      const startKey = `${request.startLocation}→${spot.address}`;
+      const cached = directionsCache[startKey];
+      if (cached) {
+        legDistanceKm = cached.distanceKm;
+        legMinutes = cached.durationMinutes;
+      } else {
+        // Try to fetch directions for this leg
+        try {
+          const result = await getDirections({
+            originAddress: request.startLocation,
+            destinationAddress: spot.address,
+            travelMode: request.travelMode,
+          });
+          legDistanceKm = result.distanceKm;
+          legMinutes = result.durationMinutes;
+        } catch {
+          // Fallback: estimate ~10 min for start leg
+          legDistanceKm = 0.5;
+          legMinutes = 8;
+        }
+      }
+      totalDistanceKm += legDistanceKm;
+      totalTravelMinutes += legMinutes;
+    } else if (i > 0) {
       const prevSpot = spotsById.get(plan.stops[i - 1].spotId);
       if (prevSpot) {
         // Try to find cached directions
