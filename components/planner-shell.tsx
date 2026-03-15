@@ -187,6 +187,78 @@ function isRetrieveLocationsPart(p: Record<string, unknown>): boolean {
   return false;
 }
 
+function extractFitSignals(reason: string): string[] {
+  const lower = reason.toLowerCase();
+  const signals: string[] = [];
+
+  const matchedPart = reason.match(/matched on ([^.]+)/i)?.[1];
+  if (matchedPart) {
+    for (const token of matchedPart.split("+").map((s) => s.trim()).filter(Boolean)) {
+      signals.push(token);
+    }
+  }
+  if (lower.includes("budget")) signals.push("budget-fit");
+  if (lower.includes("walking-friendly")) signals.push("walk-friendly");
+  if (lower.includes("driving-friendly")) signals.push("drive-friendly");
+  if (lower.includes("transit-friendly")) signals.push("transit-friendly");
+
+  return Array.from(new Set(signals)).slice(0, 4);
+}
+
+function getClarifierChips(lastAssistantText: string, mode: ChatMode): string[] {
+  const text = lastAssistantText.toLowerCase();
+
+  if (/coffee|cafe|matcha|espresso/.test(text)) {
+    return [
+      "Espresso-focused cafes",
+      "Matcha and specialty drinks",
+      "Pour-over coffee spots",
+      "Quick takeaway coffee"
+    ];
+  }
+  if (/lunch|dinner|eat|restaurant|cuisine/.test(text)) {
+    return [
+      "Japanese for lunch",
+      "Italian casual dining",
+      "Korean BBQ vibe",
+      "Vegan-friendly options"
+    ];
+  }
+  if (/budget|price|spend|cost/.test(text)) {
+    return [
+      "Budget-friendly",
+      "Mid-range",
+      "Premium splurge"
+    ];
+  }
+  if (/start|starting|from where|where are you starting/.test(text)) {
+    return [
+      "Start from CBD",
+      "Start from Fitzroy",
+      "Start from Richmond",
+      "Start from Brunswick"
+    ];
+  }
+  if (/walk|driv|transit|public transport|get around|transport/.test(text)) {
+    return [
+      "I will be walking",
+      "I will drive",
+      "Public transport please"
+    ];
+  }
+
+  if (mode === "recommendations") {
+    return [
+      "Hidden cafes in Fitzroy",
+      "Budget brunch in Carlton",
+      "Rooftop bars in CBD",
+      "Shopping + coffee in Brunswick"
+    ];
+  }
+
+  return [];
+}
+
 /* ── helpers for venues ───────────────────────────────────── */
 function parseTags(raw: string): string[] {
   try { return JSON.parse(raw); } catch { return []; }
@@ -1030,6 +1102,11 @@ export function PlannerShell() {
     return "";
   }, [visibleMessages]);
 
+  const clarifierChips = useMemo(
+    () => getClarifierChips(lastAssistantText, chatMode),
+    [lastAssistantText, chatMode]
+  );
+
   useEffect(() => {
     if (chatMode !== "route-planning") return;
     if (!pendingModeSwitchMessage) return;
@@ -1142,7 +1219,7 @@ export function PlannerShell() {
                   </CardHeader>
                   <CardContent className="px-4 pb-4">
                     <p className="text-xs text-muted-foreground leading-relaxed">
-                      I will ask for any missing details (area, vibe, budget), then recommend the best 5 matches.
+                      I will clarify missing details (coffee type or cuisine, area, budget, transport), then run multiple searches and return the best personalized 5.
                     </p>
                   </CardContent>
                 </Card>
@@ -1175,10 +1252,19 @@ export function PlannerShell() {
                               </p>
                             </div>
                             <Badge variant="outline" className="font-mono text-[0.6rem] shrink-0">
-                              {result.score}
+                              {result.score.toFixed(2)}
                             </Badge>
                           </div>
                           <p className="text-[0.65rem] text-muted-foreground/80 leading-relaxed">{result.reason}</p>
+                          {extractFitSignals(result.reason).length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 pt-0.5">
+                              {extractFitSignals(result.reason).map((signal) => (
+                                <Badge key={`${result.id}-${signal}`} variant="secondary" className="text-[0.6rem] font-medium capitalize">
+                                  {signal.replace("-", " ")}
+                                </Badge>
+                              ))}
+                            </div>
+                          )}
                           <div className="flex items-center gap-2 pt-1">
                             {result.googleMapsUrl && (
                               <Button size="sm" variant="outline" className="h-7 text-[0.65rem]" asChild>
@@ -1507,6 +1593,23 @@ export function PlannerShell() {
                   }}
                 >
                   {s}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {!isBusy && clarifierChips.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 px-1">
+              {clarifierChips.map((chip) => (
+                <button
+                  key={chip}
+                  type="button"
+                  className="rounded-full border border-border/35 px-3 py-1.5 text-[0.68rem] text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
+                  onClick={() => {
+                    sendMessage({ text: chip });
+                  }}
+                >
+                  {chip}
                 </button>
               ))}
             </div>

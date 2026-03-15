@@ -32,6 +32,24 @@ export type Venue = VenueRaw & {
 
 export type SpotKind = "food" | "lookout" | "fashion";
 export type TravelMode = "walking" | "driving" | "transit";
+export type ChatMode = "route-planning" | "recommendations";
+
+export type BudgetBand = "budget" | "mid" | "premium";
+
+export type RecommendationPreferences = {
+  category?: "cafe" | "restaurant" | "bar" | "attraction" | "shopping";
+  area?: string;
+  targetAreas?: string[];
+  vibe?: string;
+  coffeeStyle?: string;
+  cuisine?: string;
+  budget?: BudgetBand;
+  startLocation?: string;
+  transportMode?: TravelMode;
+  dietary?: string;
+  partySize?: number;
+  timeWindow?: string;
+};
 
 export type SourcePost = {
   platform: "tiktok" | "instagram" | "youtube" | "rednote";
@@ -107,4 +125,25 @@ export type ItineraryResponse = {
   stops: PlannedStop[];
   backups: Spot[];
   candidates: SearchResult[];
+};
+
+export type RecommendationItem = {
+  id: string;
+  name: string;
+  city: string | null;
+  suburb: string | null;
+  category: string | null;
+  vibe: string | null;
+  address: string | null;
+  website: string | null;
+  googleMapsUrl: string | null;
+  tags: string[];
+  score: number;
+  reason: string;
+};
+
+export type RecommendationsResponse = {
+  queryText: string;
+  results: RecommendationItem[];
+  error?: string;
 };
