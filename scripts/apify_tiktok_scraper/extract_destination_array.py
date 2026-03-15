@@ -95,7 +95,7 @@ def clean_text(value: Any) -> str:
 
 
 def normalize_destination(value: str) -> str:
-    value = re.sub(r"\s+", " ", value).strip(" -|,:;[]()")
+    value = re.sub(r"\s+", " ", str(value or "")).strip(" -|,:;[]()")
     value = value.lstrip("@").strip()
     return value
 

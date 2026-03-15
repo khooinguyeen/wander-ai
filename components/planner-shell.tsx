@@ -48,6 +48,7 @@ import {
   TooltipTrigger
 } from "@/components/ui/tooltip";
 import { AgentIcon, AgentIconWindy } from "@/components/agent-icon";
+import { hydrateVenues } from "@/lib/venues";
 import { cn } from "@/lib/utils";
 import { usePlaceDetails } from "@/lib/use-place-details";
 import { usePlacePhoto } from "@/lib/use-place-photo";
@@ -56,6 +57,7 @@ import type {
   PlannedStop,
   TravelMode,
   Venue,
+  VenueRaw,
   VenueCategory
 } from "@/lib/types";
 import { Star } from "lucide-react";
@@ -149,6 +151,74 @@ function isBuildRoutePart(p: Record<string, unknown>): boolean {
   if (p.type === "tool-buildRoute") return true;
   if (p.type === "dynamic-tool" && p.toolName === "buildRoute") return true;
   return false;
+}
+
+type TikTokIngestResponse = {
+  inputUrl: string;
+  rawItemCount: number;
+  candidateRecordCount: number;
+  matchedRecordCount: number;
+  venues: VenueRaw[];
+  database: {
+    enabled: boolean;
+    collection: string | null;
+    addedCount: number;
+    updatedCount: number;
+    addedIds: string[];
+    updatedIds: string[];
+  };
+};
+
+type IngestEvent = {
+  id: string;
+  createdAt: string;
+  source: "app_chat" | "telegram_bot" | "discord_bot" | "discord_command" | "unknown";
+  inputUrl: string;
+  venueCount: number;
+  addedCount: number;
+  updatedCount: number;
+  success: boolean;
+  error: string | null;
+  venues: VenueRaw[];
+};
+
+function extractTikTokUrl(text: string): string | null {
+  const match = text.match(/https?:\/\/(?:[\w-]+\.)?tiktok\.com\/[^\s]+/i);
+  return match ? match[0] : null;
+}
+
+function appendLocalMessage(
+  setMessages: (updater: (messages: any[]) => any[]) => void,
+  role: "user" | "assistant",
+  text: string,
+  id = crypto.randomUUID(),
+) {
+  setMessages((messages) => [
+    ...messages,
+    {
+      id,
+      role,
+      parts: [{ type: "text", text }],
+    },
+  ]);
+  return id;
+}
+
+function replaceLocalMessage(
+  setMessages: (updater: (messages: any[]) => any[]) => void,
+  id: string,
+  text: string,
+) {
+  setMessages((messages) =>
+    messages.map((message) =>
+      message.id === id
+        ? {
+            ...message,
+            parts: [{ type: "text", text }],
+          }
+        : message,
+    ),
+  );
 }
 
 /* ── helpers for venues ───────────────────────────────────── */
@@ -760,9 +830,10 @@ const chatTransport = new DefaultChatTransport({ api: "/api/chat" });
 /* ── Main shell ────────────────────────────────────────────── */
 export function PlannerShell() {
   const [venues, setVenues] = useState<Venue[]>([]);
+  const [isImportingTikTok, setIsImportingTikTok] = useState(false);
   const [activeStopId, setActiveStopId] = useState<string | null>(null);
-  const [welcomeMsg] = useState(getRandomWelcome);
-  const [placeholder] = useState(() => PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)]);
+  const [welcomeMsg, setWelcomeMsg] = useState(WELCOME_PROMPTS[0]);
+  const [placeholder, setPlaceholder] = useState(PLACEHOLDERS[0]);
   const [input, setInput] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
   const [venueSearch, setVenueSearch] = useState("");
@@ -774,6 +845,7 @@ export function PlannerShell() {
     "welcome" | "windy" | "map" | "chat" | "typing" | "done"
   >("welcome");
   const [typedChars, setTypedChars] = useState(0);
+  const seenIngestEventIdsRef = useRef<Set<string>>(new Set());
 
   /* Lazy-load venues from API instead of bundling 283KB JSON into client */
   useEffect(() => {
@@ -784,6 +856,9 @@ export function PlannerShell() {
   }, []);
 
   useEffect(() => {
+    setWelcomeMsg(getRandomWelcome());
+    setPlaceholder(PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)]);
+
     const t0 = setTimeout(() => setIntroPhase("windy"), 1500);
     const t1 = setTimeout(() => setIntroPhase("map"), 2200);
     const t2 = setTimeout(() => { setIntroPhase("chat"); setRightOpen(true); }, 3000);
@@ -832,7 +907,7 @@ export function PlannerShell() {
   }, [categoryFilter, venueSearch, venues]);
 
   // v5 useChat — transport-based, sendMessage API
-  const { messages, sendMessage, status } = useChat({
+  const { messages, sendMessage, setMessages, status } = useChat({
     transport: chatTransport,
     messages: [
       {
@@ -843,7 +918,75 @@ export function PlannerShell() {
     ]
   });
 
-  const isBusy = status === "submitted" || status === "streaming";
+  useEffect(() => {
+    let cancelled = false;
+
+    async function pollIngestEvents(initial = false) {
+      try {
+        const response = await fetch("/api/ingest/events", { cache: "no-store" });
+        const events = (await response.json()) as IngestEvent[];
+        if (cancelled || !Array.isArray(events)) return;
+
+        const freshEvents = events
+          .filter((event) => !seenIngestEventIdsRef.current.has(event.id))
+          .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+
+        for (const event of events) {
+          seenIngestEventIdsRef.current.add(event.id);
+        }
+
+        if (initial) {
+          return;
+        }
+
+        for (const event of freshEvents) {
+          if (event.source !== "telegram_bot") {
+            continue;
+          }
+          const hydrated = hydrateVenues(Array.isArray(event.venues) ? event.venues : []);
+          if (hydrated.length > 0) {
+            setVenues((current) => {
+              const merged = new Map<string, Venue>();
+              for (const venue of current) {
+                merged.set(venue.google_place_id ?? venue.id, venue);
+              }
+              for (const venue of hydrated) {
+                merged.set(venue.google_place_id ?? venue.id, venue);
+              }
+              return Array.from(merged.values()).sort((left, right) =>
+                `${left.suburb}|${left.name}`.localeCompare(`${right.suburb}|${right.name}`),
+              );
+            });
+            setSelectedVenueId(hydrated[0].id);
+            setCategoryFilter("all");
+            setLeftOpen(true);
+          }
+          const text = event.success
+            ? event.venueCount === 0
+              ? "Telegram bot checked a TikTok but did not get a usable Melbourne venue from it."
+              : hydrated.length > 0
+                ? `${hydrated[0].name} got added from TikTok.`
+                : "A new venue got added from TikTok."
+            : `Telegram bot ingest failed: ${event.error ?? "unknown error"}`;
+          appendLocalMessage(setMessages, "assistant", text);
+        }
+      } catch {
+        // Ignore polling failures; the next interval can recover.
+      }
+    }
+
+    void pollIngestEvents(true);
+    const interval = setInterval(() => {
+      void pollIngestEvents(false);
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [setMessages]);
+
+  const isBusy = status === "submitted" || status === "streaming" || isImportingTikTok;
 
   // Extract itinerary from tool parts (handles both static "tool-buildRoute" and "dynamic-tool")
   const itinerary = useMemo<ItineraryResponse | null>(() => {
@@ -960,11 +1103,77 @@ export function PlannerShell() {
     return text.trim().length > 0;
   });
 
+  async function handleTikTokImport(text: string, tiktokUrl: string) {
+    setIsImportingTikTok(true);
+    appendLocalMessage(setMessages, "user", text);
+    const statusMessageId = appendLocalMessage(
+      setMessages,
+      "assistant",
+      "Checking that TikTok, extracting venue clues, and matching them against the database.",
+    );
+
+    try {
+      const response = await fetch("/api/ingest/tiktok", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: tiktokUrl, source: "app_chat" }),
+      });
+      const payload = (await response.json()) as TikTokIngestResponse | { error: string };
+
+      if (!response.ok || "error" in payload) {
+        throw new Error("error" in payload ? payload.error : "TikTok ingest failed");
+      }
+
+      const hydrated = hydrateVenues(payload.venues);
+      setVenues((current) => {
+        const merged = new Map<string, Venue>();
+        for (const venue of current) {
+          merged.set(venue.google_place_id ?? venue.id, venue);
+        }
+        for (const venue of hydrated) {
+          merged.set(venue.google_place_id ?? venue.id, venue);
+        }
+        return Array.from(merged.values()).sort((left, right) =>
+          `${left.suburb}|${left.name}`.localeCompare(`${right.suburb}|${right.name}`),
+        );
+      });
+
+      if (hydrated.length > 0) {
+        setSelectedVenueId(hydrated[0].id);
+        setCategoryFilter("all");
+        setLeftOpen(true);
+      }
+
+      const venueCount = payload.venues.length;
+      const summary =
+        venueCount === 0
+          ? "I checked that TikTok but did not get a usable Melbourne venue out of it."
+          : `I found ${venueCount} venue${venueCount === 1 ? "" : "s"} from that TikTok. `
+              + `Database sync: ${payload.database.addedCount} added, ${payload.database.updatedCount} refreshed. `
+              + "The extracted places are now on the map and in the places panel.";
+      replaceLocalMessage(setMessages, statusMessageId, summary);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "TikTok ingest failed";
+      replaceLocalMessage(
+        setMessages,
+        statusMessageId,
+        `I could not ingest that TikTok URL. ${message}`,
+      );
+    } finally {
+      setIsImportingTikTok(false);
+    }
+  }
+
   // Send handler
   function handleSend() {
     const text = input.trim();
     if (!text || isBusy) return;
     setInput("");
+    const tiktokUrl = extractTikTokUrl(text);
+    if (tiktokUrl) {
+      void handleTikTokImport(text, tiktokUrl);
+      return;
+    }
     sendMessage({ text });
   }
 
