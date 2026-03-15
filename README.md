@@ -1,4 +1,4 @@
-# Scout Route MVP
+# Mappy AI MVP
 
 Quick MVP for a Melbourne discovery app that turns a social-style query into a compact day route for food, lowkey lookouts, and fashion spots.
 
