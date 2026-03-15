@@ -1,4 +1,4 @@
-# Mappy
+# Mappy AI
 
 Melbourne discovery app — chat with an AI local guide to find food spots, cafes, bars, attractions and plan your perfect day route.
 
