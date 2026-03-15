@@ -9,14 +9,14 @@ import type { ItineraryResponse, PlannedStop, Spot, TravelMode } from "@/lib/typ
 
 /* ── schemas ────────────────────────────────────────────────── */
 
-const planRequestSchema = z.object({
-  query: z.string().trim().min(3).max(280),
-  startLocation: z.string().trim().max(120).optional().default(""),
-  travelMode: z.enum(["walking", "driving", "transit"]).default("driving"),
-  maxStops: z.number().int().min(2).max(6).default(4),
-});
-
-type PlanRequest = z.infer<typeof planRequestSchema>;
+type PlanRequest = {
+  query: string;
+  startLocation?: string;
+  travelMode: "walking" | "driving" | "transit";
+  maxStops: number;
+  venueIds?: string[];
+  venueNames?: string[];
+};
 
 const itineraryOutputSchema = z.object({
   dayTheme: z.string().describe("A catchy 3-8 word name for this day plan"),
@@ -36,34 +36,48 @@ const itineraryOutputSchema = z.object({
 /* ── build itinerary programmatically ─────────────────────── */
 
 export async function buildItinerary(request: PlanRequest): Promise<ItineraryResponse> {
-  console.log("[plan] Starting programmatic route build:", request.query);
+  console.log("[plan] Starting route build:", request.query, "venueIds:", request.venueIds);
 
-  // 1. Load all spots and try to match specific venue names from the query
+  // 1. Load all spots
   const allSpots = await getAllSpots();
+  const allSpotsById = new Map(allSpots.map((s) => [s.id, s]));
 
-  // Try to find venues mentioned by name in the query
-  const queryLower = request.query.toLowerCase();
-  const nameMatched: Spot[] = [];
-  for (const spot of allSpots) {
-    const nameLower = spot.name.toLowerCase();
-    // Check if the venue name (or a significant part) appears in the query
-    if (nameLower.length > 3 && queryLower.includes(nameLower)) {
-      nameMatched.push(spot);
+  // 2. Resolve venues — prioritise explicit IDs, then name match, then search
+  let candidates: Spot[] = [];
+
+  if (request.venueIds?.length) {
+    // Direct ID lookup — most reliable
+    for (const id of request.venueIds) {
+      const spot = allSpotsById.get(id);
+      if (spot) candidates.push(spot);
+    }
+    console.log("[plan] ID-matched:", candidates.map(s => s.name));
+  }
+
+  if (request.venueNames?.length && candidates.length < request.maxStops) {
+    // Fuzzy name match
+    const existingIds = new Set(candidates.map(s => s.id));
+    for (const name of request.venueNames) {
+      const nameLower = name.toLowerCase();
+      const match = allSpots.find(s => !existingIds.has(s.id) && s.name.toLowerCase().includes(nameLower));
+      if (match) { candidates.push(match); existingIds.add(match.id); }
+    }
+    console.log("[plan] After name-match:", candidates.map(s => s.name));
+  }
+
+  // Fill remaining with search if needed
+  if (candidates.length < request.maxStops) {
+    const existingIds = new Set(candidates.map(s => s.id));
+    const searchResults = await searchSpots({
+      query: `${request.query} ${request.startLocation || "Melbourne"}`,
+      startLocation: request.startLocation,
+      maxResults: request.maxStops * 3,
+    });
+    for (const s of searchResults) {
+      if (!existingIds.has(s.id)) { candidates.push(s); existingIds.add(s.id); }
+      if (candidates.length >= request.maxStops * 2) break;
     }
   }
-  console.log("[plan] Name-matched venues:", nameMatched.map(s => s.name));
-
-  // Fill remaining slots with searchSpots results
-  const nameMatchedIds = new Set(nameMatched.map(s => s.id));
-  const searchResults = await searchSpots({
-    query: `${request.query} ${request.startLocation || "Melbourne"}`,
-    startLocation: request.startLocation,
-    maxResults: request.maxStops * 3,
-  });
-  const extraCandidates = searchResults.filter(s => !nameMatchedIds.has(s.id));
-
-  // Combine: name-matched first, then search results
-  const candidates = [...nameMatched, ...extraCandidates];
 
   if (candidates.length === 0) {
     throw new Error("No matching spots found for your request");
@@ -71,18 +85,30 @@ export async function buildItinerary(request: PlanRequest): Promise<ItineraryRes
 
   const spotsById = new Map(candidates.map((s) => [s.id, s]));
 
-  // 2. Pick spots: prioritise name-matched, then fill with nearest-neighbour
+  // 3. Pick spots — if IDs were given, use them in order; otherwise nearest-neighbour
   const picked: Spot[] = [];
+  const remaining: Spot[] = [];
 
-  // Add all name-matched spots first (in nearest-neighbour order)
-  const namePool = [...nameMatched];
-  const remaining = [...extraCandidates.slice(0, Math.max(request.maxStops * 2, 8))];
+  if (request.venueIds?.length) {
+    // Use the ID-matched spots in the given order
+    for (const id of request.venueIds) {
+      const spot = allSpotsById.get(id);
+      if (spot) picked.push(spot);
+    }
+    // Any extra candidates become remaining
+    const pickedIds = new Set(picked.map(s => s.id));
+    for (const s of candidates) {
+      if (!pickedIds.has(s.id)) remaining.push(s);
+    }
+  } else {
+    remaining.push(...candidates.slice(0, Math.max(request.maxStops * 2, 8)));
+  }
 
-  // Start from a reasonable center if no start location coords
+  // Only do nearest-neighbour if we don't already have picked spots
   let currentLat = -37.8136; // Melbourne CBD default
   let currentLng = 144.9631;
 
-  for (let i = 0; i < request.maxStops && remaining.length > 0; i++) {
+  for (let i = picked.length; i < request.maxStops && remaining.length > 0; i++) {
     // Find nearest unvisited spot
     let bestIdx = 0;
     let bestDist = Infinity;

@@ -49,11 +49,12 @@ If the user is vague or says "surprise me" at any point, fill in sensible defaul
 
 ### filterPlaces
 Search the venue database using semantic search (RAG). Calling this updates the places panel with matching results.
-IMPORTANT: Call this proactively during the planning flow — after the user describes their vibe, after they ask for a different category, etc. This is how recommendations appear for them to browse and pick from.
-After calling, present a friendly summary of the top 3-5 results conversationally.
+IMPORTANT: Call this proactively — after the user describes their vibe, after they ask for a different category, etc.
+After calling, present a friendly summary of the top 3-5 results. Remember the venue IDs from the results — you'll need them for buildRoute.
 
 ### buildRoute
-Build a Melbourne day route. Use this once you have enough info from the planning flow.
+Build a Melbourne day route connecting specific venues. You MUST pass the venue IDs (the "id" field from filterPlaces results) in the venueIds array.
+Example: if filterPlaces returned venues with IDs like "ChIJ7WOBhx9D1moRxd_W_xx0Nmo", pass those exact IDs to buildRoute.
 
 ## Style
 - Use Australian casual English. "Reckon", "solid pick", "keen?" are fine.
@@ -83,38 +84,28 @@ export async function POST(req: Request) {
     tools: {
       buildRoute: tool({
         description:
-          "Build a Melbourne day route once you have the vibe/query, start location, travel mode, and number of stops.",
+          "Build a Melbourne day route connecting specific venues by their IDs. Use the venue IDs from filterPlaces results.",
         inputSchema: z.object({
+          venueIds: z
+            .array(z.string())
+            .describe("Google Place IDs of venues to include, from filterPlaces results"),
           query: z
             .string()
-            .describe(
-              "The user's trip brief / vibe description, e.g. 'lowkey northside day with coffee and a lookout'"
-            ),
+            .describe("Brief vibe description for the route theme"),
           startLocation: z
             .string()
-            .describe("Starting suburb or landmark, e.g. 'Fitzroy' or 'Flinders Street Station'"),
+            .describe("Starting suburb or landmark"),
           travelMode: z
             .enum(["walking", "driving", "transit"])
             .describe("How they want to travel between stops"),
-          maxStops: z
-            .number()
-            .int()
-            .min(2)
-            .max(6)
-            .describe("Number of stops to include in the route")
         }),
         execute: async (args) => {
-          const raw = args as Record<string, unknown>;
-          const query = (raw.query ?? raw.vibe ?? raw.trip_brief ?? "") as string;
-          const startLocation = (raw.startLocation ?? raw.start_location ?? "CBD") as string;
-          const travelMode = (raw.travelMode ?? raw.travel_mode ?? "walking") as TravelMode;
-          const maxStops = Number(raw.maxStops ?? raw.max_stops ?? 4);
-
           const itinerary = await buildItinerary({
-            query: query || "fun day out in Melbourne",
-            startLocation,
-            travelMode,
-            maxStops: Math.max(2, Math.min(6, maxStops))
+            query: args.query || "day out in Melbourne",
+            startLocation: args.startLocation || "CBD",
+            travelMode: args.travelMode as TravelMode,
+            maxStops: Math.max(2, args.venueIds?.length ?? 4),
+            venueIds: args.venueIds,
           });
           return itinerary;
         }
