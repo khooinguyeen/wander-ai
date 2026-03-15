@@ -30,6 +30,8 @@ GENERIC_GOOGLE_TYPES = {
     "country",
 }
 
+MAX_TOP_REVIEWS = 5
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -207,6 +209,7 @@ def google_place_details(*, api_key: str, place_id: str) -> dict[str, Any]:
                     "serves_beer",
                     "serves_wine",
                     "serves_vegetarian_food",
+                    "reviews",
                 ]
             ),
             "key": api_key,
@@ -220,6 +223,38 @@ def google_place_details(*, api_key: str, place_id: str) -> dict[str, Any]:
         raise SystemExit(f"Google Place Details failed for '{place_id}': {payload}")
     result = payload.get("result", {})
     return result if isinstance(result, dict) else {}
+
+
+def extract_top_reviews(result: dict[str, Any], *, limit: int = MAX_TOP_REVIEWS) -> list[dict[str, Any]]:
+    reviews = result.get("reviews")
+    if not isinstance(reviews, list):
+        return []
+
+    normalized: list[dict[str, Any]] = []
+    for review in reviews:
+        if not isinstance(review, dict):
+            continue
+        normalized.append(
+            {
+                "authorName": review.get("author_name"),
+                "authorUrl": review.get("author_url"),
+                "language": review.get("language"),
+                "originalLanguage": review.get("original_language"),
+                "rating": review.get("rating"),
+                "relativeTimeDescription": review.get("relative_time_description"),
+                "text": review.get("text"),
+                "time": review.get("time"),
+            }
+        )
+
+    normalized.sort(
+        key=lambda item: (
+            item.get("rating") if isinstance(item.get("rating"), (int, float)) else -1,
+            item.get("time") if isinstance(item.get("time"), (int, float)) else -1,
+        ),
+        reverse=True,
+    )
+    return normalized[:limit]
 
 
 def is_generic_google_match(types: list[Any]) -> bool:
@@ -276,6 +311,7 @@ def enrich_record(*, api_key: str, record: dict[str, Any]) -> dict[str, Any]:
         best_result.get("current_opening_hours", {}) if isinstance(best_result, dict) else {}
     )
     editorial_summary = best_result.get("editorial_summary")
+    top_reviews = extract_top_reviews(best_result)
 
     enriched.update(
         {
@@ -316,6 +352,8 @@ def enrich_record(*, api_key: str, record: dict[str, Any]) -> dict[str, Any]:
             "googleServesBeer": best_result.get("serves_beer"),
             "googleServesWine": best_result.get("serves_wine"),
             "googleServesVegetarianFood": best_result.get("serves_vegetarian_food"),
+            "googleTopReviews": top_reviews,
+            "googleTopReviewsCount": len(top_reviews),
         }
     )
     return enriched
