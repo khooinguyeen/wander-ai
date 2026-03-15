@@ -245,7 +245,7 @@ export async function retrieveLocationsFromChroma(
 
   const clarification = cleanText(request.clarification);
   const topK = Math.max(1, Math.min(20, request.topK ?? 8));
-  const collectionName = request.collectionName ?? getEnv("CHROMA_COLLECTION_NAME") ?? "melbourne_locations";
+  const collectionName = request.collectionName ?? getEnv("CHROMA_COLLECTION") ?? getEnv("CHROMA_COLLECTION_NAME") ?? "venues";
 
   const queryText = composeSearchText(intent, clarification);
   const intentKeywords = tokenize(intent);

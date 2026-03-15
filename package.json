@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.58",
     "@ai-sdk/google": "^2.0.62",
     "@ai-sdk/provider-utils": "^4.0.19",
     "@ai-sdk/react": "^3.0.118",

@@ -54,11 +54,8 @@ import { cn } from "@/lib/utils";
 import { usePlaceDetails } from "@/lib/use-place-details";
 import { usePlacePhoto } from "@/lib/use-place-photo";
 import type {
-  ChatMode,
   ItineraryResponse,
   PlannedStop,
-  RecommendationItem,
-  RecommendationsResponse,
   TravelMode,
   Venue,
   VenueCategory
@@ -129,20 +126,20 @@ const PLATFORMS: { value: Platform; icon: React.ReactNode }[] = [
   { value: "facebook", icon: PLATFORM_ICONS.facebook },
 ];
 
-const SUGGESTIONS: Record<ChatMode, string[]> = {
-  "route-planning": [
-    "lowkey northside day with coffee and a lookout",
-    "southside brunch then sunset for a date",
-    "CBD fashion and food route for a visitor",
-    "lunch and fashion stores around Fitzroy"
-  ],
-  recommendations: [
-    "Recommend hidden cafes near Fitzroy",
-    "Best rooftop bars in CBD for date night",
-    "Top budget-friendly brunch spots in Carlton",
-    "Cozy places in Brunswick with chill vibe"
-  ]
-};
+const SUGGESTIONS = [
+  "lowkey northside day with coffee and a lookout",
+  "southside brunch then sunset for a date",
+  "CBD fashion and food route for a visitor",
+  "show me hidden cafes near Fitzroy",
+  "best date night spots in the city",
+  "plan a food crawl through Richmond",
+  "vintage shopping and coffee in Collingwood",
+  "scenic walk with a good brunch stop",
+  "where's good for sunset drinks tonight?",
+  "surprise me with something local and vibes",
+  "chill Saturday morning — coffee and pastries",
+  "rooftop bars and late-night eats",
+];
 
 const PLACEHOLDERS = [
   "Plan me a date night...",
@@ -157,17 +154,6 @@ const PLACEHOLDERS = [
   "Build me the perfect Saturday...",
 ];
 
-const RECOMMENDATION_PLACEHOLDERS = [
-  "What vibe are you after?",
-  "Which suburb should I focus on?",
-  "Any budget range in mind?",
-  "Want hidden gems or popular spots?",
-  "Tell me area + mood and I'll narrow it down...",
-];
-
-const ROUTE_SWITCH_CONFIRM_PATTERN = /(switch|move).*(route planning)|route planning mode|confirm.*switch/i;
-const AFFIRMATIVE_PATTERN = /^(yes|y|yeah|yep|yup|sure|ok|okay|go ahead|please do|do it|confirm|sounds good)\b/i;
-
 const WELCOME_PROMPTS_ROUTE = [
   "Hey! What kind of day are you planning? Give me the vibe — brunch crawl, date day, shopping + coffee, whatever you're feeling.",
   "G'day! Planning a Melbourne day out? Tell me what you're in the mood for and I'll sort a route.",
@@ -179,30 +165,11 @@ const WELCOME_PROMPTS_ROUTE = [
   "Let's get into it. What are you after today — food, fashion, scenic stuff, or a mix of everything?"
 ];
 
-const WELCOME_PROMPTS_RECOMMENDATIONS = [
-  "Hey! Keen for recommendations? Tell me the vibe and suburb, and I'll narrow it down.",
-  "G'day! What sort of places are you after — cozy cafes, bars, hidden gems, or something else?",
-  "Let's find your top picks. Share area, vibe, and budget if you've got them.",
-  "Sweet, recommendation mode on. What are you in the mood for and where abouts?",
-  "I can shortlist the best spots. Start with your vibe and preferred area."
-];
-
-function getRandomWelcome(mode: ChatMode) {
-  const pool = mode === "recommendations" ? WELCOME_PROMPTS_RECOMMENDATIONS : WELCOME_PROMPTS_ROUTE;
-  return pool[Math.floor(Math.random() * pool.length)];
+function getRandomWelcome() {
+  return WELCOME_PROMPTS_ROUTE[Math.floor(Math.random() * WELCOME_PROMPTS_ROUTE.length)];
 }
 
 /* ── helpers ───────────────────────────────────────────────── */
-
-function prettyMode(mode: TravelMode) {
-  return mode.charAt(0).toUpperCase() + mode.slice(1);
-}
-
-function ModeIcon({ mode }: { mode: TravelMode }) {
-  if (mode === "walking") return <Footprints className="size-3" />;
-  if (mode === "transit") return <Train className="size-3" />;
-  return <Car className="size-3" />;
-}
 
 /** Extract text content from a UIMessage */
 function getMessageText(msg: { parts: Array<{ type: string; text?: string }> }): string {
@@ -216,13 +183,6 @@ function getMessageText(msg: { parts: Array<{ type: string; text?: string }> }):
 function isBuildRoutePart(p: Record<string, unknown>): boolean {
   if (p.type === "tool-buildRoute") return true;
   if (p.type === "dynamic-tool" && p.toolName === "buildRoute") return true;
-  return false;
-}
-
-/** Check if a part is the retrieveLocations tool */
-function isRetrieveLocationsPart(p: Record<string, unknown>): boolean {
-  if (p.type === "tool-retrieveLocations") return true;
-  if (p.type === "dynamic-tool" && p.toolName === "retrieveLocations") return true;
   return false;
 }
 
@@ -863,13 +823,11 @@ function StopCard({
 export function PlannerShell() {
   const [venues, setVenues] = useState<Venue[]>([]);
   const [activeStopId, setActiveStopId] = useState<string | null>(null);
-  const [chatMode, setChatMode] = useState<ChatMode>("route-planning");
-  const [pendingModeSwitchMessage, setPendingModeSwitchMessage] = useState<string | null>(null);
-  const [welcomeByMode] = useState<Record<ChatMode, string>>(() => ({
-    "route-planning": getRandomWelcome("route-planning"),
-    recommendations: getRandomWelcome("recommendations"),
-  }));
-  const welcomeMsg = welcomeByMode[chatMode];
+  const [welcomeMsg] = useState(() => getRandomWelcome());
+  const [shownSuggestions, setShownSuggestions] = useState(() => {
+    const shuffled = [...SUGGESTIONS].sort(() => Math.random() - 0.5);
+    return shuffled.slice(0, 3);
+  });
   const [input, setInput] = useState("");
   const [activeCategories, setActiveCategories] = useState<Set<CategoryValue>>(new Set());
   const [activePlatforms, setActivePlatforms] = useState<Set<Platform>>(new Set());
@@ -888,6 +846,8 @@ export function PlannerShell() {
     });
   }, []);
   const [venueSearch, setVenueSearch] = useState("");
+  const [aiFilterActive, setAiFilterActive] = useState(false);
+  const [aiFilteredIds, setAiFilteredIds] = useState<Set<string> | null>(null);
   const [selectedVenueId, setSelectedVenueId] = useState<string | null>(null);
   const leftScrollRef = useRef<HTMLDivElement>(null);
   const [leftOpen, setLeftOpen] = useState(false);
@@ -999,35 +959,36 @@ export function PlannerShell() {
   );
 
   const filteredVenues = useMemo(() => {
+    // AI RAG filter takes priority — show only matched venue IDs
+    if (aiFilterActive && aiFilteredIds) {
+      return venues.filter((v) => aiFilteredIds.has(v.id));
+    }
     let result = venues;
     if (activeCategories.size > 0) result = result.filter((v) => activeCategories.has(v.uiCategory));
     if (activePlatforms.size > 0) result = result.filter((v) => venuePlatforms(v).some((p) => activePlatforms.has(p)));
     if (venueSearch.trim()) {
-      const q = venueSearch.toLowerCase();
-      result = result.filter((v) =>
-        v.name.toLowerCase().includes(q) ||
-        v.suburb.toLowerCase().includes(q) ||
-        v.city.toLowerCase().includes(q) ||
-        (v.vibe ?? "").toLowerCase().includes(q) ||
-        v.tags.toLowerCase().includes(q)
-      );
+      const words = venueSearch.toLowerCase().split(/\s+/).filter(w => w.length > 1);
+      if (words.length > 0) {
+        result = result.filter((v) => {
+          const haystack = `${v.name} ${v.suburb} ${v.city} ${v.vibe ?? ""} ${v.tags} ${v.description ?? ""}`.toLowerCase();
+          return words.some(w => haystack.includes(w));
+        });
+      }
     }
     return result;
-  }, [activeCategories, activePlatforms, venueSearch, venues]);
+  }, [activeCategories, activePlatforms, venueSearch, venues, aiFilterActive, aiFilteredIds]);
 
-  // Mode-aware transport — sends current mode with every request
   const activeTransport = useMemo(
-    () => new DefaultChatTransport({ api: "/api/chat", body: { mode: chatMode } }),
-    [chatMode]
+    () => new DefaultChatTransport({ api: "/api/chat" }),
+    []
   );
 
-  // v5 useChat — per-mode thread isolation keyed by id
   const { messages, sendMessage, setMessages, status } = useChat({
-    id: `planner-${chatMode}`,
+    id: "planner",
     transport: activeTransport,
     messages: [
       {
-        id: `welcome-${chatMode}`,
+        id: "welcome",
         role: "assistant",
         parts: [{ type: "text", text: welcomeMsg }]
       }
@@ -1086,35 +1047,30 @@ export function PlannerShell() {
     return false;
   }, [messages]);
 
-  // Extract recommendations from retrieveLocations tool output
-  const recommendations = useMemo<RecommendationsResponse | null>(() => {
+  // Apply AI filter tool results to the venue list
+  useEffect(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       for (const part of messages[i].parts) {
-        const p = part as any;
-        if (isRetrieveLocationsPart(p) && p.state === "output-available" && p.output) {
-          return p.output as RecommendationsResponse;
+        const p = part as Record<string, unknown>;
+        const isFilter = (p.type === "tool-filterPlaces") ||
+          (p.type === "dynamic-tool" && p.toolName === "filterPlaces");
+        if (isFilter && p.state === "output-available" && p.output) {
+          const out = p.output as { venueIds?: string[]; searchQuery?: string };
+          if (out.venueIds && out.venueIds.length > 0) {
+            setAiFilteredIds(new Set(out.venueIds));
+          }
+          setVenueSearch("");
+          setActiveCategories(new Set());
+          setAiFilterActive(true);
+          return;
         }
       }
     }
-    return null;
   }, [messages]);
 
   useEffect(() => {
     if (itinerary?.stops.length) setActiveStopId(itinerary.stops[0].spot.id);
   }, [itinerary]);
-
-  // Auto-confirm mode switch: when user confirmed switch to route-planning, send in new thread
-  useEffect(() => {
-    if (!pendingModeSwitchMessage || chatMode !== "route-planning") return;
-    sendMessage({ text: pendingModeSwitchMessage });
-    setPendingModeSwitchMessage(null);
-  }, [pendingModeSwitchMessage, chatMode, sendMessage]);
-
-  // Clear workspace state on mode switch
-  useEffect(() => {
-    setActiveStopId(null);
-    setSelectedVenueId(null);
-  }, [chatMode]);
 
   const activeStop =
     itinerary?.stops.find((s) => s.spot.id === activeStopId) ??
@@ -1171,35 +1127,39 @@ export function PlannerShell() {
     }
   ];
 
-  // Mode-specific placeholder, refreshes on mode change
   const placeholder = useMemo(() => {
-    const pool = chatMode === "recommendations" ? RECOMMENDATION_PLACEHOLDERS : PLACEHOLDERS;
-    return pool[Math.floor(Math.random() * pool.length)];
-  }, [chatMode]);
+    return PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)];
+  }, []);
 
-  // Only show messages that have visible text
   const visibleMessages = messages.filter((m) => {
     const text = getMessageText(m);
     return text.trim().length > 0;
   });
 
-  // Send handler
   function handleSend() {
     const text = input.trim();
     if (!text || isBusy) return;
     setInput("");
-    // Detect affirmative response to a route-switch offer in recommendations mode
-    if (chatMode === "recommendations") {
-      const lastAssistantMsg = [...messages].reverse().find((m) => m.role === "assistant");
-      const lastText = lastAssistantMsg ? getMessageText(lastAssistantMsg) : "";
-      if (AFFIRMATIVE_PATTERN.test(text) && ROUTE_SWITCH_CONFIRM_PATTERN.test(lastText)) {
-        setPendingModeSwitchMessage(text);
-        setChatMode("route-planning");
-        return;
-      }
-    }
     sendMessage({ text });
   }
+
+  const handleReset = useCallback(() => {
+    setMessages([{
+      id: "welcome",
+      role: "assistant",
+      parts: [{ type: "text", text: welcomeMsg }]
+    }]);
+    setInput("");
+    setActiveStopId(null);
+    setActiveCategories(new Set());
+    setActivePlatforms(new Set());
+    setVenueSearch("");
+    setAiFilterActive(false);
+    setAiFilteredIds(null);
+    setSelectedVenueId(null);
+    setMobileMenuOpen(false);
+    setShownSuggestions([...SUGGESTIONS].sort(() => Math.random() - 0.5).slice(0, 3));
+  }, [welcomeMsg, setMessages]);
 
   return (
     <main className="shell">
@@ -1279,97 +1239,7 @@ export function PlannerShell() {
 
           <div className="p-5 space-y-6">
 
-            {chatMode === "recommendations" ? (
-              /* Recommendations workspace */
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold">Top Picks</h3>
-                  {recommendations && (
-                    <span className="text-xs text-muted-foreground">
-                      {recommendations.results.length} spot{recommendations.results.length !== 1 ? "s" : ""}
-                    </span>
-                  )}
-                </div>
-
-                {recommendations?.error ? (
-                  <div className="rounded-xl border border-destructive/30 bg-destructive/8 px-4 py-3">
-                    <p className="text-xs text-destructive/80">{recommendations.error}</p>
-                  </div>
-                ) : recommendations && recommendations.results.length > 0 ? (
-                  <div className="space-y-2">
-                    {recommendations.results.map((item, idx) => (
-                      <div
-                        key={item.id}
-                        className="rounded-xl border border-border/40 bg-card/40 p-3 space-y-1.5 hover:border-border/60 hover:bg-card/60 transition-all"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5 text-muted-foreground/60 mb-0.5">
-                              <span className="text-[0.6rem] font-mono">{String(idx + 1).padStart(2, "0")}</span>
-                              {item.category && (
-                                <span className="text-[0.6rem] capitalize">{item.category}</span>
-                              )}
-                            </div>
-                            <p className="text-sm font-semibold truncate">{item.name}</p>
-                            <p className="text-[0.65rem] text-muted-foreground">
-                              {[item.suburb, item.city].filter(Boolean).join(" · ")}
-                            </p>
-                          </div>
-                          <Badge variant="outline" className="shrink-0 font-mono text-[0.6rem]">
-                            {Math.round(item.score * 100)}
-                          </Badge>
-                        </div>
-                        <p className="text-[0.65rem] text-muted-foreground/70 leading-relaxed">
-                          {item.reason}
-                        </p>
-                        {item.tags.length > 0 && (
-                          <div className="flex flex-wrap gap-1 pt-0.5">
-                            {item.tags.slice(0, 3).map((tag) => (
-                              <Badge key={tag} variant="outline" className="text-[0.6rem] font-normal opacity-70">
-                                {tag}
-                              </Badge>
-                            ))}
-                          </div>
-                        )}
-                        <div className="flex gap-3 pt-0.5">
-                          {item.googleMapsUrl && (
-                            <a
-                              href={item.googleMapsUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-[0.6rem] text-primary/70 hover:text-primary flex items-center gap-0.5 transition-colors"
-                            >
-                              <MapPin className="size-2.5" />
-                              Maps
-                            </a>
-                          )}
-                          {item.website && (
-                            <a
-                              href={item.website}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-[0.6rem] text-primary/70 hover:text-primary flex items-center gap-0.5 transition-colors"
-                            >
-                              <ExternalLink className="size-2.5" />
-                              Website
-                            </a>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="grid gap-3 py-10 justify-items-center text-center">
-                    <div className="grid place-items-center size-10 rounded-2xl bg-muted/40 text-muted-foreground/50">
-                      <Search className="size-5" />
-                    </div>
-                    <p className="text-sm text-muted-foreground/60 max-w-[220px] leading-relaxed">
-                      Ask for recommendations in the chat and your top picks will appear here.
-                    </p>
-                  </div>
-                )}
-              </div>
-            ) : itinerary ? (
+            {itinerary ? (
               <>
                 {/* Route overview */}
                 <Card className="border-primary/20 bg-primary/5 shadow-none">
@@ -1529,11 +1399,27 @@ export function PlannerShell() {
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className="heading-serif text-[0.95rem]">
-                    {activeCategories.size === 0 ? "All places" : [...activeCategories].join(", ")}
+                    {aiFilterActive ? "Mappy picks" : activeCategories.size === 0 ? "All places" : [...activeCategories].join(", ")}
                   </h3>
-                  <span className="text-xs text-muted-foreground">
-                    {filteredVenues.length} spots
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      {filteredVenues.length} spots
+                    </span>
+                    {aiFilterActive && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAiFilterActive(false);
+                          setAiFilteredIds(null);
+                          setVenueSearch("");
+                          setActiveCategories(new Set());
+                        }}
+                        className="text-[0.65rem] text-primary hover:text-primary/80 font-medium transition-colors"
+                      >
+                        Show all
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <VenueList
                   venues={filteredVenues}
@@ -1557,41 +1443,6 @@ export function PlannerShell() {
           <ArrowUpRight className="size-2.5" />
         </button>
 
-        {/* mode switch + reset */}
-        <div className="shrink-0 flex items-center justify-between gap-2 px-4 pt-4 pb-1">
-          <div className="flex items-center rounded-xl border border-border/30 bg-muted/20 p-0.5 gap-0.5">
-            {(["route-planning", "recommendations"] as ChatMode[]).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => setChatMode(mode)}
-                className={cn(
-                  "rounded-lg px-3 py-1.5 text-[0.7rem] font-medium transition-all",
-                  chatMode === mode
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {mode === "route-planning" ? "Route Planning" : "Recommendations"}
-              </button>
-            ))}
-          </div>
-          {messages.length > 1 && (
-            <button
-              type="button"
-              onClick={() => setMessages([{
-                id: `welcome-${chatMode}`,
-                role: "assistant",
-                parts: [{ type: "text", text: welcomeMsg }]
-              }])}
-              className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-[0.65rem] text-muted-foreground/60 hover:text-muted-foreground hover:bg-muted/30 transition-all"
-              title="Clear current chat"
-            >
-              <RotateCcw className="size-3" />
-              Reset
-            </button>
-          )}
-        </div>
 
         {/* conversation */}
         <Conversation className="flex-1 min-h-0">
@@ -1609,13 +1460,13 @@ export function PlannerShell() {
               ) : (
                 <div key={m.id} className="chat-msg flex items-start gap-3">
                   <div className="shrink-0 mt-0.5 grid place-items-center size-7">
-                    {m.id.startsWith("welcome-") && (introPhase === "chat" || introPhase === "typing") ? (
+                    {m.id === "welcome" && (introPhase === "chat" || introPhase === "typing") ? (
                       <AgentIconWindy className="size-6" />
                     ) : (
                       <AgentIcon className="size-6" />
                     )}
                   </div>
-                  {m.id.startsWith("welcome-") && introPhase === "chat" ? (
+                  {m.id === "welcome" && introPhase === "chat" ? (
                     <div className="leaf-wind h-7 mt-1">
                       <span className="leaf-wind__leaf">🍃</span>
                       <span className="leaf-wind__leaf">🍃</span>
@@ -1625,9 +1476,9 @@ export function PlannerShell() {
                     <div className="min-w-0 flex-1">
                       <p className={cn(
                         "text-[15px] leading-[1.7] text-foreground",
-                        m.id.startsWith("welcome-") && introPhase === "typing" && "intro-typewriter"
+                        m.id === "welcome" && introPhase === "typing" && "intro-typewriter"
                       )}>
-                        {m.id.startsWith("welcome-") && introPhase === "typing"
+                        {m.id === "welcome" && introPhase === "typing"
                           ? welcomeMsg.slice(0, typedChars)
                           : getMessageText(m)}
                       </p>
@@ -1657,7 +1508,7 @@ export function PlannerShell() {
         <div className="shrink-0 px-4 pb-4 pt-2 space-y-2.5">
           {messages.length <= 1 && (
             <div className="flex flex-col gap-2 px-1">
-              {SUGGESTIONS[chatMode].map((s, i) => (
+              {shownSuggestions.map((s, i) => (
                 <button
                   key={s}
                   type="button"
@@ -1684,9 +1535,9 @@ export function PlannerShell() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder={placeholder}
-              rows={1}
+              rows={3}
               disabled={isBusy}
-              className="block w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-[15px] text-foreground placeholder:text-muted-foreground/50 outline-none"
+              className="block w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-[15px] text-foreground placeholder:text-muted-foreground/50 outline-none min-h-[4.5rem]"
               style={{ fieldSizing: "content" } as React.CSSProperties}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
@@ -1696,6 +1547,16 @@ export function PlannerShell() {
               }}
             />
             <div className="flex items-center justify-end gap-2 px-3 pb-2.5">
+              {messages.length > 1 && (
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  className="shrink-0 grid place-items-center size-7 rounded-full text-muted-foreground/50 hover:text-foreground hover:bg-muted/30 transition-all"
+                  title="Reset"
+                >
+                  <RotateCcw className="size-3.5" />
+                </button>
+              )}
               <button
                 type="submit"
                 disabled={isBusy || !input.trim()}
@@ -1864,9 +1725,20 @@ export function PlannerShell() {
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <h3 className="heading-serif text-[0.9rem]">
-                        {activeCategories.size === 0 ? "All places" : [...activeCategories].join(", ")}
+                        {aiFilterActive ? "Mappy picks" : activeCategories.size === 0 ? "All places" : [...activeCategories].join(", ")}
                       </h3>
-                      <span className="text-xs text-muted-foreground">{filteredVenues.length} spots</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">{filteredVenues.length} spots</span>
+                        {aiFilterActive && (
+                          <button
+                            type="button"
+                            onClick={() => { setAiFilterActive(false); setAiFilteredIds(null); setVenueSearch(""); setActiveCategories(new Set()); }}
+                            className="text-[0.65rem] text-primary hover:text-primary/80 font-medium transition-colors"
+                          >
+                            Show all
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <VenueList venues={filteredVenues} selectedVenueId={selectedVenueId} onSelect={handleSelectVenue} />
                   </div>
@@ -1930,6 +1802,16 @@ export function PlannerShell() {
                     }}
                   />
                   <div className="flex items-center justify-end gap-2 px-3 pb-2">
+                    {messages.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={handleReset}
+                        className="shrink-0 grid place-items-center size-7 rounded-full text-muted-foreground/50 hover:text-foreground hover:bg-muted/30 transition-all"
+                        title="Reset"
+                      >
+                        <RotateCcw className="size-3.5" />
+                      </button>
+                    )}
                     <button
                       type="submit"
                       disabled={isBusy || !input.trim()}

@@ -1,4 +1,4 @@
-import { google } from "@ai-sdk/google";
+import { anthropic } from "@ai-sdk/anthropic";
 import { generateText, stepCountIs, tool } from "ai";
 import { z } from "zod";
 
@@ -65,10 +65,8 @@ export async function buildItinerary(request: PlanRequest): Promise<ItineraryRes
   // Collect directions data as the agent calls getDirections
   const directionsCache: Record<string, { distanceKm: number; durationMinutes: number; summary: string }> = {};
 
-  const model = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite-preview";
-
   const { toolResults } = await generateText({
-    model: google(model),
+    model: anthropic("claude-haiku-4-5-20251001"),
     system: PLANNER_SYSTEM,
     prompt: JSON.stringify({
       userRequest: {
