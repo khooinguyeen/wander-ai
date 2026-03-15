@@ -81,6 +81,7 @@ const LazyYouTubeEmbed = dynamic(
   { ssr: false, loading: () => <div className="h-[300px] animate-pulse rounded-lg bg-muted" /> }
 );
 
+
 const HAS_GOOGLE_MAPS = Boolean(process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY);
 
 /* ── Category filter (multi-select) ───────────────────────── */
@@ -241,7 +242,7 @@ const CATEGORY_ICON_SM: Record<string, React.ReactNode> = {
   cafe: <Coffee className="size-3" />,
   bar: <Wine className="size-3" />,
   attraction: <MapPin className="size-3" />,
-  shopping: <MapPin className="size-3" />,
+  shopping: <ShoppingBag className="size-3" />,
   other: <MapPin className="size-3" />,
 };
 
@@ -272,16 +273,16 @@ function VenueCard({
         )}
       >
         {/* Text content */}
-        <div className="p-3 space-y-1 min-w-0">
+        <div className="p-3.5 space-y-1 min-w-0">
           <div className="flex items-center gap-1.5 text-muted-foreground/60">
             {icon}
-            <span className="text-[0.6rem] capitalize">{venue.uiCategory}</span>
+            <span className="text-[0.7rem] capitalize">{venue.uiCategory}</span>
             {priceLabel(venue.price_level) && (
-              <span className="text-[0.6rem]">{priceLabel(venue.price_level)}</span>
+              <span className="text-[0.7rem]">{priceLabel(venue.price_level)}</span>
             )}
           </div>
-          <h3 className="text-sm font-semibold truncate leading-tight">{venue.name}</h3>
-          <p className="text-[0.7rem] text-muted-foreground/70 leading-relaxed line-clamp-2">
+          <h3 className="text-[0.85rem] font-semibold truncate leading-snug">{venue.name}</h3>
+          <p className="text-xs text-muted-foreground/70 leading-relaxed line-clamp-2">
             {venue.description}
           </p>
         </div>
@@ -364,12 +365,12 @@ function VenueList({
     <div className="space-y-4">
       {groups.map((group) => (
         <div key={group.suburb}>
-          <div className="suburb-header sticky top-0 z-10 flex items-center gap-2 px-1 py-1.5 mb-1.5">
+          <div className="suburb-header sticky top-0 z-10 flex items-center gap-2 px-1 py-2 mb-1.5">
             <MapPin className="size-3 text-primary/60" />
-            <span className="text-[0.7rem] font-semibold tracking-wide uppercase text-primary/80">
+            <span className="section-label text-primary/80">
               {group.suburb}
             </span>
-            <span className="text-[0.6rem] text-muted-foreground/50">{group.venues.length}</span>
+            <span className="text-xs text-muted-foreground/40">{group.venues.length}</span>
           </div>
           <div className="space-y-2">
             {group.venues.map((venue) => (
@@ -393,7 +394,7 @@ function VenueList({
 }
 
 /* ── Social embed helpers ───────────────────────────────── */
-type SocialLink = { platform: "tiktok" | "instagram" | "youtube" | "google-maps"; url: string; embedUrl: string | null };
+type SocialLink = { platform: "tiktok" | "instagram" | "youtube" | "facebook" | "google-maps"; url: string; embedUrl: string | null };
 
 function parseSocialUrls(raw: string): SocialLink[] {
   let urls: string[];
@@ -438,8 +439,8 @@ function SocialEmbeds({ links }: { links: SocialLink[] }) {
   if (embeddable.length === 0) return null;
 
   return (
-    <div className="space-y-2">
-      <p className="text-[0.6rem] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
+    <div className="space-y-2.5">
+      <p className="section-label">
         Featured on
       </p>
       <div className="flex flex-col gap-2">
@@ -489,7 +490,7 @@ const CATEGORY_ICON: Record<string, React.ReactNode> = {
   cafe: <Coffee className="size-5" />,
   bar: <Wine className="size-5" />,
   attraction: <MapPin className="size-5" />,
-  shopping: <MapPin className="size-5" />,
+  shopping: <ShoppingBag className="size-5" />,
   other: <MapPin className="size-5" />,
 };
 
@@ -513,7 +514,7 @@ function VenueDetail({
   const hours = liveHours ?? (fallbackHours.length > 0 ? fallbackHours : undefined);
 
   return (
-    <div className="venue-detail rounded-2xl overflow-hidden">
+    <div className="venue-detail">
       {/* Photo carousel from Google Places */}
       {place?.photos && place.photos.length > 0 ? (
         <div className="flex gap-0.5 overflow-x-auto scrollbar-hide">
@@ -522,35 +523,35 @@ function VenueDetail({
               key={i}
               src={photo.url}
               alt={`${venue.name} photo ${i + 1}`}
-              className="h-36 w-auto object-cover flex-shrink-0"
+              className="h-44 w-auto object-cover flex-shrink-0"
               loading="lazy"
             />
           ))}
         </div>
       ) : placeLoading ? (
-        <div className="h-36 animate-pulse bg-muted" />
+        <div className="h-44 animate-pulse bg-muted" />
       ) : null}
 
       {/* Header */}
-      <div className="px-4 pt-3 pb-2">
+      <div className="px-5 pt-4 pb-2">
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-3">
             <div
-              className="grid place-items-center size-9 rounded-full"
+              className="grid place-items-center size-10 rounded-xl"
               style={{ background: accentColor }}
             >
               <span className="text-white">{icon}</span>
             </div>
             <div>
-              <h3 className="text-sm font-bold leading-tight">{venue.name}</h3>
-              <div className="flex items-center gap-1.5 mt-0.5">
-                <span className="text-[0.65rem] text-muted-foreground capitalize">{venue.uiCategory}</span>
-                <span className="text-[0.65rem] text-muted-foreground/50">·</span>
-                <span className="text-[0.65rem] text-muted-foreground">{venue.suburb !== "unknown" ? venue.suburb : venue.city}</span>
+              <h3 className="heading-serif text-base leading-tight">{venue.name}</h3>
+              <div className="flex items-center gap-1.5 mt-1">
+                <span className="text-xs text-muted-foreground capitalize">{venue.uiCategory}</span>
+                <span className="text-xs text-muted-foreground/40">·</span>
+                <span className="text-xs text-muted-foreground">{venue.suburb !== "unknown" ? venue.suburb : venue.city}</span>
                 {priceLabel(venue.price_level) && (
                   <>
-                    <span className="text-[0.65rem] text-muted-foreground/50">·</span>
-                    <span className="text-[0.65rem] text-muted-foreground">{priceLabel(venue.price_level)}</span>
+                    <span className="text-xs text-muted-foreground/40">·</span>
+                    <span className="text-xs text-muted-foreground">{priceLabel(venue.price_level)}</span>
                   </>
                 )}
               </div>
@@ -559,18 +560,18 @@ function VenueDetail({
           <button
             type="button"
             onClick={onClose}
-            className="shrink-0 grid place-items-center size-6 rounded-full hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
+            className="shrink-0 grid place-items-center size-7 rounded-lg hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
           >
-            <span className="text-xs">✕</span>
+            <span className="text-sm">✕</span>
           </button>
         </div>
 
         {/* Rating + open/closed from Google Places */}
         {place && (
-          <div className="flex items-center gap-3 mt-2">
+          <div className="flex items-center gap-3 mt-2.5">
             {place.rating != null && (
-              <span className="flex items-center gap-1 text-[0.65rem] font-medium">
-                <Star className="size-3 fill-amber-400 text-amber-400" />
+              <span className="flex items-center gap-1.5 text-xs font-medium">
+                <Star className="size-3.5 fill-amber-400 text-amber-400" />
                 {place.rating.toFixed(1)}
                 {place.userRatingCount != null && (
                   <span className="text-muted-foreground font-normal">({place.userRatingCount.toLocaleString()})</span>
@@ -579,7 +580,7 @@ function VenueDetail({
             )}
             {place.currentOpeningHours?.openNow != null && (
               <span className={cn(
-                "text-[0.6rem] font-semibold px-1.5 py-0.5 rounded-full",
+                "text-[0.7rem] font-medium px-2 py-0.5 rounded-md",
                 place.currentOpeningHours.openNow
                   ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
                   : "bg-red-500/15 text-red-600 dark:text-red-400"
@@ -592,20 +593,20 @@ function VenueDetail({
       </div>
 
       {/* Body */}
-      <div className="px-4 pb-4 pt-1 space-y-3">
-        <p className="text-xs text-muted-foreground/80 leading-relaxed">
+      <div className="px-5 pb-5 pt-1 space-y-4">
+        <p className="text-[0.8rem] text-muted-foreground/90 leading-[1.7]">
           {place?.editorialSummary?.text ?? venue.description}
         </p>
 
         {/* Vibe + tags */}
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap gap-1.5">
           {venue.vibe && (
-            <Badge variant="secondary" className="text-[0.6rem] font-medium capitalize">
+            <Badge variant="secondary" className="text-[0.7rem] font-medium capitalize rounded-md px-2 py-0.5">
               {venue.vibe}
             </Badge>
           )}
           {tags.map((tag) => (
-            <Badge key={tag} variant="outline" className="text-[0.6rem] font-normal opacity-80">
+            <Badge key={tag} variant="outline" className="text-[0.7rem] font-normal rounded-md px-2 py-0.5 opacity-80">
               {tag}
             </Badge>
           ))}
@@ -614,24 +615,31 @@ function VenueDetail({
         {/* Google reviews */}
         {place?.reviews && place.reviews.length > 0 && (
           <div className="space-y-2">
-            <p className="text-[0.6rem] font-semibold tracking-[0.12em] uppercase text-muted-foreground">
+            <p className="section-label">
               Reviews
             </p>
             {place.reviews.map((review, i) => (
-              <div key={i} className="text-[0.65rem] rounded-lg bg-muted/40 p-2.5 space-y-1">
-                <div className="flex items-center gap-1.5">
-                  <span className="flex items-center gap-0.5">
+              <div key={i} className="text-[0.75rem] rounded-xl border border-border/30 p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="grid place-items-center size-6 rounded-full bg-primary/15 text-[0.6rem] font-bold text-primary shrink-0">
+                      {review.authorAttribution?.displayName?.[0]?.toUpperCase() ?? "?"}
+                    </span>
+                    <div className="flex flex-col">
+                      {review.authorAttribution?.displayName && (
+                        <span className="font-semibold text-foreground text-[0.75rem] leading-tight">{review.authorAttribution.displayName}</span>
+                      )}
+                      <span className="text-muted-foreground text-[0.65rem] leading-tight">{review.relativePublishTimeDescription}</span>
+                    </div>
+                  </div>
+                  <span className="flex items-center gap-0.5 shrink-0">
                     {Array.from({ length: review.rating }, (_, j) => (
                       <Star key={j} className="size-2.5 fill-amber-400 text-amber-400" />
                     ))}
                   </span>
-                  {review.authorAttribution?.displayName && (
-                    <span className="text-muted-foreground">{review.authorAttribution.displayName}</span>
-                  )}
-                  <span className="text-muted-foreground/60 ml-auto">{review.relativePublishTimeDescription}</span>
                 </div>
                 {review.text?.text && (
-                  <p className="text-muted-foreground/80 line-clamp-3">{review.text.text}</p>
+                  <p className="text-secondary-foreground leading-[1.55] line-clamp-3">{review.text.text}</p>
                 )}
               </div>
             ))}
@@ -642,21 +650,21 @@ function VenueDetail({
         <SocialEmbeds links={socialLinks} />
 
         {/* Meta row */}
-        <div className="flex items-center gap-3 text-[0.6rem] text-muted-foreground/70">
-          <span className="flex items-center gap-1">
-            <MapPin className="size-2.5" />
+        <div className="flex items-center gap-3 text-xs text-muted-foreground/70">
+          <span className="flex items-center gap-1.5">
+            <MapPin className="size-3" />
             {venue.suburb !== "unknown" ? venue.suburb : venue.city}
           </span>
           {hours && hours.length > 0 && (
             <details className="group inline">
-              <summary className="cursor-pointer hover:text-foreground transition-colors flex items-center gap-1">
-                <Clock3 className="size-2.5" />
+              <summary className="cursor-pointer hover:text-foreground transition-colors flex items-center gap-1.5">
+                <Clock3 className="size-3" />
                 Hours
-                <span className="group-open:rotate-180 transition-transform text-[0.5rem]">▾</span>
+                <span className="group-open:rotate-180 transition-transform text-[0.6rem]">▾</span>
               </summary>
-              <div className="mt-1.5 space-y-0.5 absolute z-10 bg-popover border border-border/40 rounded-lg p-2.5 shadow-lg text-[0.6rem]">
+              <div className="mt-2 space-y-0.5 absolute z-10 bg-popover border border-border/40 rounded-xl p-3 shadow-lg text-xs">
                 {hours.map((h) => (
-                  <p key={h} className="text-muted-foreground/80">{h}</p>
+                  <p key={h} className="text-muted-foreground/80 leading-relaxed">{h}</p>
                 ))}
               </div>
             </details>
@@ -664,22 +672,22 @@ function VenueDetail({
         </div>
 
         {/* Actions */}
-        <div className="flex gap-2">
+        <div className="flex gap-2 pt-1">
           {(place?.websiteUri ?? venue.website) && (
-            <Button size="sm" variant="outline" className="text-[0.65rem] flex-1 h-7 rounded-full" asChild>
+            <Button size="sm" variant="outline" className="text-xs flex-1 h-8 rounded-lg" asChild>
               <a href={(place?.websiteUri ?? venue.website)!} target="_blank" rel="noreferrer">
-                <ExternalLink className="size-3" />
+                <ExternalLink className="size-3.5" />
                 Website
               </a>
             </Button>
           )}
-          <Button size="sm" className="text-[0.65rem] flex-1 h-7 rounded-full" asChild>
+          <Button size="sm" className="text-xs flex-1 h-8 rounded-lg" asChild>
             <a
               href={place?.googleMapsUri ?? venue.google_maps_url ?? `https://www.google.com/maps/search/?api=1&query=${venue.lat},${venue.lng}`}
               target="_blank"
               rel="noreferrer"
             >
-              <ArrowUpRight className="size-3" />
+              <ArrowUpRight className="size-3.5" />
               Directions
             </a>
           </Button>
@@ -825,25 +833,25 @@ function StopCard({
           : "border-border/40 bg-transparent hover:bg-muted/40"
       )}
     >
-      <div className="grid place-items-center size-9 rounded-lg bg-primary text-primary-foreground font-bold font-mono text-xs">
+      <div className="grid place-items-center size-9 rounded-lg bg-primary text-primary-foreground font-semibold font-mono text-xs">
         {String(index + 1).padStart(2, "0")}
       </div>
       <div className="space-y-1 min-w-0">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-[0.65rem] text-muted-foreground">
+          <span className="text-xs text-muted-foreground">
             {stop.arrivalTime}
           </span>
-          <span className="text-[0.65rem] text-muted-foreground">
+          <span className="text-xs text-muted-foreground">
             {stop.legFromPreviousMinutes > 0
               ? `${stop.legFromPreviousMinutes} min · ${stop.legDistanceKm} km`
               : "Route start"}
           </span>
         </div>
-        <h3 className="text-sm font-semibold truncate">{stop.spot.name}</h3>
-        <p className="text-[0.65rem] text-muted-foreground">
+        <h3 className="text-[0.85rem] font-semibold truncate">{stop.spot.name}</h3>
+        <p className="text-xs text-muted-foreground">
           {stop.spot.area} · {stop.spot.kind} · {stop.spot.priceBand ?? "Free"}
         </p>
-        <p className="text-[0.65rem] text-muted-foreground/70 leading-relaxed">
+        <p className="text-xs text-muted-foreground/70 leading-[1.6]">
           {stop.reason}
         </p>
       </div>
@@ -881,9 +889,67 @@ export function PlannerShell() {
   }, []);
   const [venueSearch, setVenueSearch] = useState("");
   const [selectedVenueId, setSelectedVenueId] = useState<string | null>(null);
+  const leftScrollRef = useRef<HTMLDivElement>(null);
   const [leftOpen, setLeftOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
-  const { resolvedTheme } = useTheme();
+  const [mobileTab, setMobileTab] = useState<"places" | "chat">("chat");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  /* ── Mobile panel drag-to-resize ──────────────────────── */
+  const PANEL_MIN_H = 8;
+  const PANEL_MAX_H = 85; // cap below the search icon
+  const PANEL_DEFAULT_H = 52;
+  const PANEL_COLLAPSE_THRESHOLD = 15; // below this → collapse entirely
+  const [panelHeight, setPanelHeight] = useState(PANEL_DEFAULT_H);
+  const [panelCollapsed, setPanelCollapsed] = useState(false);
+
+  const handleSelectVenue = useCallback((id: string) => {
+    setSelectedVenueId(id);
+    leftScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    // If mobile panel is collapsed, expand it to Places
+    if (panelCollapsed) {
+      setPanelCollapsed(false);
+      setPanelHeight(PANEL_DEFAULT_H);
+      setMobileTab("places");
+    }
+  }, [panelCollapsed, PANEL_DEFAULT_H]);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragRef = useRef({ startY: 0, startH: PANEL_DEFAULT_H });
+
+  const onDragStart = useCallback((e: React.PointerEvent) => {
+    setIsDragging(true);
+    dragRef.current = { startY: e.clientY, startH: panelHeight };
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  }, [panelHeight]);
+
+  const onDragMove = useCallback((e: React.PointerEvent) => {
+    if (!isDragging) return;
+    const deltaY = dragRef.current.startY - e.clientY;
+    const deltaDvh = (deltaY / window.innerHeight) * 100;
+    setPanelHeight(Math.min(PANEL_MAX_H, Math.max(PANEL_MIN_H, dragRef.current.startH + deltaDvh)));
+  }, [isDragging]);
+
+  const onDragEnd = useCallback(() => {
+    if (!isDragging) return;
+    setIsDragging(false);
+    setPanelHeight(prev => {
+      if (prev < PANEL_COLLAPSE_THRESHOLD) {
+        setPanelCollapsed(true);
+        return 0;
+      }
+      if (prev > 80) return PANEL_MAX_H;
+      return prev;
+    });
+  }, [isDragging, PANEL_COLLAPSE_THRESHOLD]);
+
+  const expandPanel = useCallback((tab: "places" | "chat") => {
+    setMobileTab(tab);
+    setPanelCollapsed(false);
+    setPanelHeight(PANEL_DEFAULT_H);
+  }, [PANEL_DEFAULT_H]);
+  const { resolvedTheme, theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   const [introPhase, setIntroPhase] = useState<
     "welcome" | "windy" | "map" | "chat" | "typing" | "done"
   >("welcome");
@@ -1152,7 +1218,7 @@ export function PlannerShell() {
               <AgentIcon className="intro-overlay__icon" />
             )}
           </div>
-          <p className="intro-overlay__name">Mappy</p>
+          <p className="intro-overlay__name font-serif">Mappy</p>
         </div>
       )}
 
@@ -1166,7 +1232,8 @@ export function PlannerShell() {
           activeStopId={activeStopId}
           selectedVenueId={selectedVenueId}
           onSelectStop={setActiveStopId}
-          onSelectVenue={setSelectedVenueId}
+          onSelectVenue={handleSelectVenue}
+          onDeselectVenue={() => setSelectedVenueId(null)}
           startLocation={startLocation}
           travelMode={travelMode}
           colorScheme={resolvedTheme === "dark" ? "DARK" : "LIGHT"}
@@ -1187,6 +1254,8 @@ export function PlannerShell() {
         {/* Panel open buttons — visible when closed, hidden when open */}
         <PanelOpenButton side="left" open={leftOpen} onToggle={() => setLeftOpen(true)} icon={<MapPin className="size-4" />} />
         <PanelOpenButton side="right" open={rightOpen} onToggle={() => setRightOpen(true)} icon={<MessageCircle className="size-4" />} />
+
+        {/* Mobile theme toggle removed — now inside mobile menu overlay */}
       </div>
 
       {/* ── LEFT: workspace ────────────────────────────────── */}
@@ -1199,8 +1268,16 @@ export function PlannerShell() {
         >
           <ArrowUpRight className="size-2.5 rotate-[-90deg]" />
         </button>
-        <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide">
-          <div className="p-5 space-y-5">
+        <div ref={leftScrollRef} className="flex-1 min-h-0 overflow-y-auto scrollbar-hide">
+          {/* Venue detail — flush at top, outside padded content */}
+          {!itinerary && !isPlanning && selectedVenue && (
+            <VenueDetail
+              venue={selectedVenue}
+              onClose={() => setSelectedVenueId(null)}
+            />
+          )}
+
+          <div className="p-5 space-y-6">
 
             {chatMode === "recommendations" ? (
               /* Recommendations workspace */
@@ -1296,27 +1373,27 @@ export function PlannerShell() {
               <>
                 {/* Route overview */}
                 <Card className="border-primary/20 bg-primary/5 shadow-none">
-                  <CardHeader className="px-4 pt-4 pb-2">
-                    <CardDescription className="text-[0.6rem] font-semibold tracking-[0.12em] uppercase text-primary/80">
+                  <CardHeader className="px-5 pt-5 pb-2">
+                    <CardDescription className="section-label text-primary/80">
                       Your route
                     </CardDescription>
-                    <CardTitle className="text-sm font-semibold">
+                    <CardTitle className="heading-serif text-base">
                       {itinerary.dayTheme}
                     </CardTitle>
                   </CardHeader>
-                  <CardContent className="px-4 pb-4">
-                    <p className="text-xs text-muted-foreground leading-relaxed">
+                  <CardContent className="px-5 pb-5">
+                    <p className="text-[0.8rem] text-muted-foreground leading-[1.7]">
                       {itinerary.summary}
                     </p>
-                    <div className="grid grid-cols-3 gap-2 mt-3">
+                    <div className="grid grid-cols-3 gap-2.5 mt-4">
                       {[
                         { label: "Travel", value: `${itinerary.route.totalTravelMinutes} min` },
                         { label: "Distance", value: `${itinerary.route.totalDistanceKm} km` },
                         { label: "Area", value: itinerary.areaSummary }
                       ].map((m) => (
-                        <div key={m.label} className="rounded-lg bg-muted/50 p-2.5">
-                          <span className="text-[0.6rem] text-muted-foreground">{m.label}</span>
-                          <strong className="block text-sm font-mono mt-0.5">{m.value}</strong>
+                        <div key={m.label} className="rounded-xl bg-muted/50 p-3">
+                          <span className="text-xs text-muted-foreground">{m.label}</span>
+                          <strong className="block text-sm font-mono mt-1">{m.value}</strong>
                         </div>
                       ))}
                     </div>
@@ -1326,23 +1403,23 @@ export function PlannerShell() {
                 {/* Highlighted stop */}
                 {activeStop && (
                   <Card className="border-border/30 bg-card/40 shadow-none">
-                    <CardContent className="p-4 space-y-1">
-                      <p className="text-[0.6rem] font-semibold tracking-[0.12em] uppercase text-primary/80">
+                    <CardContent className="p-5 space-y-1.5">
+                      <p className="section-label text-primary/80">
                         Highlighted
                       </p>
-                      <p className="text-sm font-semibold text-foreground">
+                      <p className="heading-serif text-[0.95rem] text-foreground">
                         {activeStop.spot.name}
                       </p>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-xs text-muted-foreground leading-relaxed">
                         {activeStop.arrivalTime} &middot; {activeStop.spot.area} &middot;{" "}
                         {activeStop.spot.address}
                       </p>
-                      <p className="text-xs text-muted-foreground/70 leading-relaxed pt-1">
+                      <p className="text-xs text-muted-foreground/70 leading-[1.7] pt-1">
                         {activeStop.spot.description}
                       </p>
-                      <div className="flex flex-wrap gap-1 pt-1.5">
+                      <div className="flex flex-wrap gap-1.5 pt-2">
                         {activeStop.spot.vibeTags.slice(0, 4).map((tag) => (
-                          <Badge key={tag} variant="outline" className="text-[0.6rem] font-normal">
+                          <Badge key={tag} variant="outline" className="text-[0.7rem] font-normal rounded-md px-2 py-0.5">
                             {tag}
                           </Badge>
                         ))}
@@ -1353,8 +1430,8 @@ export function PlannerShell() {
 
                 {/* Stops timeline */}
                 <div>
-                  <div className="flex items-center justify-between mb-2.5">
-                    <h3 className="text-sm font-semibold">Stops</h3>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="heading-serif text-[0.95rem]">Stops</h3>
                     <span className="text-xs text-muted-foreground">
                       {itinerary.stops.length} selected
                     </span>
@@ -1375,17 +1452,17 @@ export function PlannerShell() {
                 {/* Backups */}
                 {itinerary.backups.length > 0 && (
                   <div>
-                    <div className="flex items-center justify-between mb-2.5">
-                      <h3 className="text-sm font-semibold">Backups</h3>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="heading-serif text-[0.95rem]">Backups</h3>
                       <span className="text-xs text-muted-foreground">Swap if needed</span>
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-2 gap-2.5">
                       {itinerary.backups.map((sp) => (
                         <Card key={sp.id} className="border-border/30 bg-card/30 shadow-none py-0">
-                          <CardContent className="p-3 space-y-0.5">
-                            <p className="text-[0.6rem] text-muted-foreground">{sp.kind}</p>
-                            <p className="text-xs font-semibold">{sp.name}</p>
-                            <p className="text-[0.6rem] text-muted-foreground">{sp.area}</p>
+                          <CardContent className="p-3.5 space-y-0.5">
+                            <p className="text-xs text-muted-foreground">{sp.kind}</p>
+                            <p className="text-[0.8rem] font-semibold">{sp.name}</p>
+                            <p className="text-xs text-muted-foreground">{sp.area}</p>
                           </CardContent>
                         </Card>
                       ))}
@@ -1395,23 +1472,23 @@ export function PlannerShell() {
 
                 {/* Top matches */}
                 <div>
-                  <div className="flex items-center justify-between mb-2.5">
-                    <h3 className="text-sm font-semibold">Top matches</h3>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="heading-serif text-[0.95rem]">Top matches</h3>
                     <span className="text-xs text-muted-foreground">Pre-route ranking</span>
                   </div>
-                  <div className="space-y-1.5">
+                  <div className="space-y-2">
                     {itinerary.candidates.slice(0, 6).map((c) => (
                       <div
                         key={c.id}
-                        className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border/20"
+                        className="flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl border border-border/20"
                       >
                         <div className="min-w-0">
-                          <p className="text-xs font-semibold truncate">{c.name}</p>
-                          <p className="text-[0.65rem] text-muted-foreground">
+                          <p className="text-[0.8rem] font-semibold truncate">{c.name}</p>
+                          <p className="text-xs text-muted-foreground">
                             {c.area} &middot; {c.kind}
                           </p>
                         </div>
-                        <Badge variant="outline" className="shrink-0 font-mono text-[0.6rem]">
+                        <Badge variant="outline" className="shrink-0 font-mono text-xs rounded-md">
                           {c.matchScore}
                         </Badge>
                       </div>
@@ -1419,7 +1496,7 @@ export function PlannerShell() {
                   </div>
                 </div>
 
-                <Button size="sm" className="w-full" asChild>
+                <Button size="sm" className="w-full rounded-xl" asChild>
                   <a
                     href={itinerary.route.googleMapsUrl}
                     target="_blank"
@@ -1431,13 +1508,13 @@ export function PlannerShell() {
                 </Button>
               </>
             ) : isPlanning ? (
-              <div className="grid gap-4 py-8 justify-items-center text-center">
-                <div className="grid place-items-center size-12 rounded-2xl bg-primary/15 text-primary animate-pulse">
-                  <Route className="size-5" />
+              <div className="grid gap-5 py-10 justify-items-center text-center">
+                <div className="grid place-items-center size-14 rounded-2xl bg-primary/15 text-primary animate-pulse">
+                  <Route className="size-6" />
                 </div>
-                <div className="space-y-1.5">
-                  <h2 className="text-base font-bold">Building your route</h2>
-                  <p className="text-sm text-muted-foreground leading-relaxed max-w-[260px]">
+                <div className="space-y-2">
+                  <h2 className="heading-serif text-lg">Building your route</h2>
+                  <p className="text-[0.85rem] text-muted-foreground leading-[1.7] max-w-[260px]">
                     Searching {venues.length}+ spots, ranking matches,
                     and projecting the best sequence...
                   </p>
@@ -1449,16 +1526,9 @@ export function PlannerShell() {
                 </div>
               </div>
             ) : (
-              <div className="space-y-3">
-                {selectedVenue && (
-                  <VenueDetail
-                    venue={selectedVenue}
-                    onClose={() => setSelectedVenueId(null)}
-                  />
-                )}
-
+              <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold">
+                  <h3 className="heading-serif text-[0.95rem]">
                     {activeCategories.size === 0 ? "All places" : [...activeCategories].join(", ")}
                   </h3>
                   <span className="text-xs text-muted-foreground">
@@ -1468,7 +1538,7 @@ export function PlannerShell() {
                 <VenueList
                   venues={filteredVenues}
                   selectedVenueId={selectedVenueId}
-                  onSelect={setSelectedVenueId}
+                  onSelect={handleSelectVenue}
                 />
               </div>
             )}
@@ -1637,6 +1707,243 @@ export function PlannerShell() {
           </form>
         </div>
       </aside>
+
+      {/* ── MOBILE: expandable filter menu ──────────────── */}
+      <div className={cn("mobile-menu-overlay", mobileMenuOpen && "mobile-menu-overlay--open")}>
+        <div className="mobile-menu-overlay__content">
+          <div className="mobile-menu-overlay__row">
+            {CATEGORIES.map((cat) => (
+              <button
+                key={cat.value}
+                type="button"
+                onClick={() => toggleCategory(cat.value)}
+                className={cn(
+                  "grid place-items-center size-8 rounded-full transition-all duration-150",
+                  activeCategories.has(cat.value)
+                    ? "bg-secondary text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+                )}
+                title={cat.value}
+              >
+                {cat.icon}
+              </button>
+            ))}
+          </div>
+          <div className="mobile-menu-overlay__row">
+            {PLATFORMS.map((p) => (
+              <button
+                key={p.value}
+                type="button"
+                onClick={() => togglePlatform(p.value)}
+                className={cn(
+                  "grid place-items-center size-8 rounded-full transition-all duration-150",
+                  activePlatforms.has(p.value)
+                    ? "bg-secondary text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+                )}
+                title={p.value}
+              >
+                {p.icon}
+              </button>
+            ))}
+          </div>
+          <div className="mobile-menu-overlay__search">
+            <Search className="size-3.5 text-muted-foreground/50 shrink-0" />
+            <input
+              value={venueSearch}
+              onChange={(e) => setVenueSearch(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Escape") setVenueSearch(""); }}
+              placeholder="Search places..."
+              className="bg-transparent text-[0.75rem] text-foreground placeholder:text-muted-foreground/40 outline-none flex-1"
+            />
+          </div>
+          <button
+            type="button"
+            className="mobile-menu-overlay__theme"
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          >
+            {mounted && theme === "dark" ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />}
+            <span>{mounted && theme === "dark" ? "Light mode" : "Dark mode"}</span>
+          </button>
+        </div>
+        {/* Tap outside to close */}
+        <div className="mobile-menu-overlay__backdrop" onClick={() => setMobileMenuOpen(false)} />
+      </div>
+
+      {/* ── MOBILE: floating menu button ───────────────── */}
+      <button
+        type="button"
+        className="mobile-menu-btn"
+        onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+        aria-label="Toggle filters menu"
+      >
+        <Search className="size-4" />
+      </button>
+
+      {/* ── MOBILE: floating tab pill ────────────────── */}
+      <div
+        className={cn("mobile-tab-pill", isDragging && "mobile-tab-pill--dragging")}
+        style={{ bottom: panelCollapsed ? "12px" : `calc(${panelHeight}dvh + 8px)` }}
+      >
+        <button
+          type="button"
+          className={cn("mobile-tab-pill__btn", !panelCollapsed && mobileTab === "places" && "mobile-tab-pill__btn--active")}
+          onClick={() => expandPanel("places")}
+        >
+          <MapPin className="size-3.5" />
+          Places
+        </button>
+        <button
+          type="button"
+          className={cn("mobile-tab-pill__btn", !panelCollapsed && mobileTab === "chat" && "mobile-tab-pill__btn--active")}
+          onClick={() => expandPanel("chat")}
+        >
+          <AgentIcon className="size-4" />
+          Mappy
+        </button>
+      </div>
+
+      {/* ── MOBILE: single bottom panel ────────────────── */}
+      <div
+        className={cn("mobile-panel", isDragging && "mobile-panel--dragging", panelCollapsed && "mobile-panel--collapsed")}
+        style={{ height: panelCollapsed ? "0px" : `${panelHeight}dvh` }}
+      >
+        {/* Drag handle */}
+        <div
+          className="mobile-panel__drag-handle"
+          onPointerDown={onDragStart}
+          onPointerMove={onDragMove}
+          onPointerUp={onDragEnd}
+          onPointerCancel={onDragEnd}
+        >
+          <div className="mobile-panel__drag-knob" />
+        </div>
+
+        {/* Panel content */}
+        <div className="mobile-panel__body scrollbar-hide">
+          {mobileTab === "places" ? (
+            /* ── Places content (mirrors left panel) ── */
+            <div ref={leftScrollRef} className="flex-1 min-h-0 overflow-y-auto scrollbar-hide">
+              {!itinerary && !isPlanning && selectedVenue && (
+                <VenueDetail
+                  venue={selectedVenue}
+                  onClose={() => setSelectedVenueId(null)}
+                />
+              )}
+              <div className="p-4 space-y-4">
+                {itinerary ? (
+                  <>
+                    <Card className="border-primary/20 bg-primary/5 shadow-none">
+                      <CardHeader className="px-4 pt-4 pb-2">
+                        <CardDescription className="section-label text-primary/80">Your route</CardDescription>
+                        <CardTitle className="heading-serif text-base">{itinerary.dayTheme}</CardTitle>
+                      </CardHeader>
+                      <CardContent className="px-4 pb-4">
+                        <p className="text-[0.8rem] text-muted-foreground leading-[1.7]">{itinerary.summary}</p>
+                      </CardContent>
+                    </Card>
+                    <div className="space-y-2">
+                      {itinerary.stops.map((s, i) => (
+                        <StopCard key={s.spot.id} stop={s} index={i} active={activeStop?.spot.id === s.spot.id} onSelect={setActiveStopId} />
+                      ))}
+                    </div>
+                    <Button size="sm" className="w-full rounded-xl" asChild>
+                      <a href={itinerary.route.googleMapsUrl} target="_blank" rel="noreferrer">
+                        <ArrowUpRight className="size-3.5" /> Open in Google Maps
+                      </a>
+                    </Button>
+                  </>
+                ) : isPlanning ? (
+                  <div className="grid gap-4 py-6 justify-items-center text-center">
+                    <div className="grid place-items-center size-12 rounded-2xl bg-primary/15 text-primary animate-pulse">
+                      <Route className="size-5" />
+                    </div>
+                    <p className="text-[0.85rem] text-muted-foreground">Building your route...</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="heading-serif text-[0.9rem]">
+                        {activeCategories.size === 0 ? "All places" : [...activeCategories].join(", ")}
+                      </h3>
+                      <span className="text-xs text-muted-foreground">{filteredVenues.length} spots</span>
+                    </div>
+                    <VenueList venues={filteredVenues} selectedVenueId={selectedVenueId} onSelect={handleSelectVenue} />
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            /* ── Chat content (mirrors right panel) ── */
+            <div className="flex flex-col flex-1 min-h-0">
+              <Conversation className="flex-1 min-h-0">
+                <ConversationContent className="gap-4 px-4 py-4">
+                  {visibleMessages.map((m) => {
+                    const isUser = (m.role as string) === "user";
+                    return isUser ? (
+                      <div key={m.id} className="chat-msg flex justify-end">
+                        <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary/15 px-3 py-2">
+                          <p className="text-[14px] leading-[1.6] text-foreground">{getMessageText(m)}</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div key={m.id} className="chat-msg flex items-start gap-2.5">
+                        <div className="shrink-0 mt-0.5 grid place-items-center size-6">
+                          <AgentIcon className="size-5" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[14px] leading-[1.7] text-foreground">{getMessageText(m)}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {isBusy && visibleMessages[visibleMessages.length - 1]?.role !== "assistant" && (
+                    <div className="chat-msg flex items-start gap-2.5">
+                      <div className="shrink-0 mt-0.5 grid place-items-center size-6">
+                        <AgentIconWindy className="size-5" />
+                      </div>
+                      <div className="leaf-wind h-6 mt-1">
+                        <span className="leaf-wind__leaf">🍃</span>
+                        <span className="leaf-wind__leaf">🍃</span>
+                        <span className="leaf-wind__leaf">🍃</span>
+                      </div>
+                    </div>
+                  )}
+                </ConversationContent>
+                <ConversationScrollButton className="bottom-2" />
+              </Conversation>
+              <div className="shrink-0 px-3 pb-3 pt-2 space-y-2">
+                <form
+                  onSubmit={(e) => { e.preventDefault(); handleSend(); }}
+                  className="composer-box rounded-2xl border-2 border-border/30 bg-muted/10 transition-all focus-within:border-primary/50 focus-within:shadow-[0_0_0_3px_oklch(0.65_0.16_255/0.15)]"
+                >
+                  <textarea
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder={placeholder}
+                    rows={1}
+                    disabled={isBusy}
+                    className="block w-full resize-none bg-transparent px-3 pt-3 pb-1 text-[14px] text-foreground placeholder:text-muted-foreground/50 outline-none"
+                    style={{ fieldSizing: "content" } as React.CSSProperties}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+                    }}
+                  />
+                  <div className="flex items-center justify-end gap-2 px-3 pb-2">
+                    <button
+                      type="submit"
+                      disabled={isBusy || !input.trim()}
+                      className="shrink-0 grid place-items-center size-7 rounded-full bg-foreground/20 text-foreground disabled:opacity-15 hover:bg-foreground/30 transition-all"
+                    >
+                      <ArrowUpRight className="size-3.5" />
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </main>
   );
 }

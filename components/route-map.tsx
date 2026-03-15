@@ -27,6 +27,7 @@ type RouteMapProps = {
   selectedVenueId: string | null;
   onSelectStop: (id: string) => void;
   onSelectVenue: (id: string) => void;
+  onDeselectVenue?: () => void;
   startLocation: string;
   travelMode: TravelMode;
   colorScheme?: "DARK" | "LIGHT";
@@ -180,7 +181,7 @@ const VENUE_CATEGORY_COLORS: Record<string, string> = {
   other: "#6b7280",
 };
 
-import { UtensilsCrossed, Coffee, Wine, MapPin, Navigation, X } from "lucide-react";
+import { UtensilsCrossed, Coffee, Wine, MapPin, Navigation, ShoppingBag, X } from "lucide-react";
 import type { ReactNode } from "react";
 
 type ModeInfo = { distance: string; duration: string };
@@ -314,12 +315,12 @@ const MIN_ZOOM = 5;
 
 function BoundsGuard({ onWarning }: { onWarning: (msg: string | null) => void }) {
   const map = useMap();
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mapRef = useRef<google.maps.Map | null>(null);
+  mapRef.current = map;
 
   useEffect(() => {
     if (!map) return;
 
-    // Lock zoom and pan to Melbourne
     map.setOptions({
       minZoom: MIN_ZOOM,
       restriction: {
@@ -327,25 +328,61 @@ function BoundsGuard({ onWarning }: { onWarning: (msg: string | null) => void })
         strictBounds: true,
       },
     });
+  }, [map]);
 
-    let prevZoom = map.getZoom() ?? 13;
-
-    const listener = map.addListener("zoom_changed", () => {
-      const zoom = map.getZoom() ?? 13;
-      // Only warn when trying to zoom out and hitting the limit
-      if (zoom <= MIN_ZOOM && zoom < prevZoom) {
+  // Use document-level capture listener so we catch wheel events
+  // even when Google Maps swallows them at min zoom
+  useEffect(() => {
+    const onWheel = (e: WheelEvent) => {
+      const m = mapRef.current;
+      if (!m) return;
+      // Check the wheel target is inside the map container
+      const div = (m as unknown as { getDiv(): HTMLElement }).getDiv();
+      if (!div.contains(e.target as Node)) return;
+      // deltaY > 0 = scroll down = zoom out
+      if (e.deltaY > 0 && (m.getZoom() ?? 13) <= MIN_ZOOM) {
         onWarning("We only cover Melbourne for now");
-        if (timeoutRef.current) clearTimeout(timeoutRef.current);
-        timeoutRef.current = setTimeout(() => onWarning(null), 2500);
       }
-      prevZoom = zoom;
-    });
-
-    return () => {
-      google.maps.event.removeListener(listener);
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
-  }, [map, onWarning]);
+
+    // Capture phase so we see the event before Google Maps can stop it
+    document.addEventListener("wheel", onWheel, { capture: true, passive: true });
+    return () => {
+      document.removeEventListener("wheel", onWheel, { capture: true } as EventListenerOptions);
+    };
+  }, [onWarning]);
+
+  // Detect pinch-to-zoom-out on touch devices
+  useEffect(() => {
+    let lastDist = 0;
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        lastDist = Math.hypot(dx, dy);
+      }
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      const m = mapRef.current;
+      if (!m || e.touches.length !== 2) return;
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const dist = Math.hypot(dx, dy);
+      if (dist < lastDist - 10 && (m.getZoom() ?? 13) <= MIN_ZOOM) {
+        onWarning("We only cover Melbourne for now");
+      }
+      lastDist = dist;
+    };
+
+    document.addEventListener("touchstart", onTouchStart, { capture: true, passive: true });
+    document.addEventListener("touchmove", onTouchMove, { capture: true, passive: true });
+    return () => {
+      document.removeEventListener("touchstart", onTouchStart, { capture: true } as EventListenerOptions);
+      document.removeEventListener("touchmove", onTouchMove, { capture: true } as EventListenerOptions);
+    };
+  }, [onWarning]);
 
   return null;
 }
@@ -355,7 +392,7 @@ const VENUE_CATEGORY_ICON: Record<string, ReactNode> = {
   cafe: <Coffee size={14} strokeWidth={2.5} color="#fff" />,
   bar: <Wine size={14} strokeWidth={2.5} color="#fff" />,
   attraction: <MapPin size={14} strokeWidth={2.5} color="#fff" />,
-  shopping: <MapPin size={14} strokeWidth={2.5} color="#fff" />,
+  shopping: <ShoppingBag size={14} strokeWidth={2.5} color="#fff" />,
   other: <MapPin size={14} strokeWidth={2.5} color="#fff" />,
 };
 
@@ -365,7 +402,7 @@ const VENUE_CATEGORY_SVG: Record<string, string> = {
   cafe: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2v2"/><path d="M14 2v2"/><path d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a2 2 0 1 1 0 4h-2"/><path d="M6 2v2"/></svg>`,
   bar: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 22h8"/><path d="M7 10h10"/><path d="M12 15v7"/><path d="m19 2-7 8-7-8Z"/></svg>`,
   attraction: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></svg>`,
-  shopping: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></svg>`,
+  shopping: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>`,
   other: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></svg>`,
 };
 
@@ -482,6 +519,7 @@ function GoogleMapInner({
   selectedVenueId,
   onSelectStop,
   onSelectVenue,
+  onDeselectVenue,
   travelMode,
   colorScheme = "DARK"
 }: RouteMapProps) {
@@ -490,17 +528,34 @@ function GoogleMapInner({
   const [showDirections, setShowDirections] = useState(false);
   const [routeInfo, setRouteInfo] = useState<AllRouteInfo | null>(null);
   const [boundsWarning, setBoundsWarning] = useState<string | null>(null);
-  const handleBoundsWarning = useCallback((msg: string | null) => setBoundsWarning(msg), []);
+  const [boundsWarningFading, setBoundsWarningFading] = useState(false);
+  const boundsWarningTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleBoundsWarning = useCallback((msg: string | null) => {
+    if (msg) {
+      // Show immediately, reset fade
+      setBoundsWarning(msg);
+      setBoundsWarningFading(false);
+      if (boundsWarningTimeout.current) clearTimeout(boundsWarningTimeout.current);
+      // Start fade after 1.5s, then remove after fade completes
+      boundsWarningTimeout.current = setTimeout(() => {
+        setBoundsWarningFading(true);
+        boundsWarningTimeout.current = setTimeout(() => {
+          setBoundsWarning(null);
+          setBoundsWarningFading(false);
+        }, 500);
+      }, 1500);
+    }
+  }, []);
 
-  // Selected venue/stop name
+  // Selected venue/stop name + category
   const selectedEntity = useMemo(() => {
     if (activeStopId && hasStops) {
       const stop = stops.find((s) => s.spot.id === activeStopId);
-      if (stop) return { name: stop.spot.name };
+      if (stop) return { name: stop.spot.name, category: stop.spot.kind ?? "other" };
     }
     if (selectedVenueId && hasVenues) {
       const venue = venues.find((v) => v.id === selectedVenueId);
-      if (venue) return { name: venue.name };
+      if (venue) return { name: venue.name, category: venue.uiCategory ?? "other" };
     }
     return null;
   }, [activeStopId, selectedVenueId, stops, venues, hasStops, hasVenues]);
@@ -558,6 +613,7 @@ function GoogleMapInner({
       streetViewControl={false}
       fullscreenControl={false}
       style={{ width: "100%", height: "100%" }}
+      onClick={() => onDeselectVenue?.()}
     >
       <BoundsGuard onWarning={handleBoundsWarning} />
       <FitBounds stops={stops} previewSpots={previewSpots} venues={venues} />
@@ -576,49 +632,64 @@ function GoogleMapInner({
       />
       {showDirections && <ZoomToSelected destination={selectedDestination} />}
 
+      {/* Show destination marker when directions are active */}
+      {showDirections && selectedDestination && selectedEntity && (
+        <AdvancedMarker position={selectedDestination} zIndex={200}>
+          <div className="pill-marker pill-marker--expanded pill-marker--venue">
+            <span className="pill-marker__icon" style={{ background: VENUE_CATEGORY_COLORS[selectedEntity.category] ?? "#3b82f6" }}>
+              {VENUE_CATEGORY_ICON[selectedEntity.category] ?? VENUE_CATEGORY_ICON.other}
+            </span>
+            <span className="pill-marker__label">{selectedEntity.name}</span>
+          </div>
+        </AdvancedMarker>
+      )}
+
       {hasStops && <DirectionsRenderer stops={stops} travelMode={travelMode} />}
 
-      {hasStops
-        ? stops.map((stop, i) => (
-            <AdvancedMarker
-              key={stop.spot.id}
-              position={{
-                lat: stop.spot.coordinates.lat,
-                lng: stop.spot.coordinates.lng
-              }}
-              onClick={() => onSelectStop(stop.spot.id)}
-              zIndex={activeStopId === stop.spot.id ? 100 : 10}
-              style={{ overflow: "visible" }}
-            >
-              <div
-                className={`pill-marker pill-marker--stop ${activeStopId === stop.spot.id ? "pill-marker--expanded" : ""}`}
-              >
-                <span className="pill-marker__num">{i + 1}</span>
-                {activeStopId === stop.spot.id && (
-                  <span className="pill-marker__label">{stop.spot.name}</span>
-                )}
-              </div>
-            </AdvancedMarker>
-          ))
-        : hasVenues
-          ? <ClusteredVenueMarkers
-              venues={venues}
-              selectedVenueId={selectedVenueId}
-              onSelectVenue={onSelectVenue}
-            />
-          : previewSpots.slice(0, 20).map((spot) => (
+      {/* Hide all other markers when directions are active */}
+      {!showDirections && (
+        hasStops
+          ? stops.map((stop, i) => (
               <AdvancedMarker
-                key={spot.id}
-                position={{ lat: spot.coordinates.lat, lng: spot.coordinates.lng }}
+                key={stop.spot.id}
+                position={{
+                  lat: stop.spot.coordinates.lat,
+                  lng: stop.spot.coordinates.lng
+                }}
+                onClick={() => onSelectStop(stop.spot.id)}
+                zIndex={activeStopId === stop.spot.id ? 100 : 10}
+                style={{ overflow: "visible" }}
               >
-                <div className="pill-marker pill-marker--preview" />
+                <div
+                  className={`pill-marker pill-marker--stop ${activeStopId === stop.spot.id ? "pill-marker--expanded" : ""}`}
+                >
+                  <span className="pill-marker__num">{i + 1}</span>
+                  {activeStopId === stop.spot.id && (
+                    <span className="pill-marker__label">{stop.spot.name}</span>
+                  )}
+                </div>
               </AdvancedMarker>
-            ))}
+            ))
+          : hasVenues
+            ? <ClusteredVenueMarkers
+                venues={venues}
+                selectedVenueId={selectedVenueId}
+                onSelectVenue={onSelectVenue}
+              />
+            : previewSpots.slice(0, 20).map((spot) => (
+                <AdvancedMarker
+                  key={spot.id}
+                  position={{ lat: spot.coordinates.lat, lng: spot.coordinates.lng }}
+                >
+                  <div className="pill-marker pill-marker--preview" />
+                </AdvancedMarker>
+              ))
+      )}
     </Map>
 
     {/* Bounds warning */}
     {boundsWarning && (
-      <div className="bounds-warning">
+      <div className={`bounds-warning ${boundsWarningFading ? "bounds-warning--fade-out" : ""}`}>
         {boundsWarning}
       </div>
     )}
@@ -628,7 +699,7 @@ function GoogleMapInner({
       <div className="directions-panel">
         <div className="directions-panel__header">
           <span className="directions-panel__name">{selectedEntity.name}</span>
-          {showDirections && (
+          {showDirections && routeInfo && (
             <button type="button" className="directions-panel__close" onClick={handleCloseDirections}>
               <X size={14} />
             </button>
