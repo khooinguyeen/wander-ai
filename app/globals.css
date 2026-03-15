@@ -1039,6 +1039,22 @@ html:not(.dark) .bounds-warning {
   animation: planning-pulse 1.4s ease-in-out infinite;
 }
 
+/* route-building animation */
+@keyframes route-anim-glow {
+  0%, 100% { opacity: 0.08; r: 8; }
+  50%      { opacity: 0.2; r: 12; }
+}
+.route-anim-pulse {
+  animation: route-anim-glow 2s ease-in-out infinite;
+}
+.route-build-anim {
+  opacity: 0;
+  animation: route-anim-fadein 0.6s ease-out 0.2s forwards;
+}
+@keyframes route-anim-fadein {
+  to { opacity: 1; }
+}
+
 /* ── Pill search input ─────────────────────────────────────── */
 .pill-search {
   background: oklch(0 0 0 / 0.06);

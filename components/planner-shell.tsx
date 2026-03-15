@@ -458,7 +458,7 @@ function SocialEmbeds({ links }: { links: SocialLink[] }) {
 }
 
 /* ── Venue detail card (shown when a venue is selected) ──── */
-const CATEGORY_COLORS: Record<string, string> = {
+const CATEGORY_ROUTE_ANIM_COLORS: Record<string, string> = {
   restaurant: "oklch(0.7 0.18 50)",
   cafe: "oklch(0.65 0.18 310)",
   bar: "oklch(0.65 0.16 255)",
@@ -484,7 +484,7 @@ function VenueDetail({
 }) {
   const tags = parseTags(venue.tags);
   const socialLinks = parseSocialUrls(venue.source_urls);
-  const accentColor = CATEGORY_COLORS[venue.uiCategory] ?? "oklch(0.65 0.16 255)";
+  const accentColor = CATEGORY_ROUTE_ANIM_COLORS[venue.uiCategory] ?? "oklch(0.65 0.16 255)";
   const icon = CATEGORY_ICON[venue.uiCategory] ?? <MapPin className="size-5" />;
 
   // Fetch live Place details (photos, rating, hours, reviews) via Place ID
@@ -792,88 +792,129 @@ function PanelOpenButton({
 }
 
 /* ── Route building animation ──────────────────────────────── */
+const ROUTE_ANIM_COLORS = ["#4f8cf9", "#f97316", "#22c55e", "#a855f7", "#ec4899", "#facc15"];
 
-/** Animated dots-and-lines that simulate a route being optimised in real time.
- *  Pure SVG — no map dependency. Uses a handful of fixed "city" dots and
- *  cycles through different connection orders to mimic route-finding. */
-function RouteAnimation({ className }: { className?: string }) {
+/** Animated dots-and-lines showing the actual venues being route-optimised.
+ *  Maps real lat/lng to SVG coordinates and cycles through different orderings. */
+function RouteAnimation({ venues, className }: { venues?: Venue[]; className?: string }) {
   const canvasRef = useRef<SVGSVGElement>(null);
-  const frameRef = useRef(0);
-  const phaseRef = useRef(0);
 
-  // Fixed node positions that loosely resemble Melbourne CBD/inner suburbs layout
-  const nodes = useMemo(() => [
-    { x: 50, y: 18 },   // top-center (Carlton)
-    { x: 78, y: 28 },   // top-right (Fitzroy)
-    { x: 88, y: 52 },   // mid-right (Richmond)
-    { x: 72, y: 78 },   // bottom-right (South Yarra)
-    { x: 42, y: 85 },   // bottom-center (South Melbourne)
-    { x: 18, y: 65 },   // left (Docklands)
-    { x: 22, y: 38 },   // top-left (North Melbourne)
-    { x: 55, y: 50 },   // center (CBD)
-  ], []);
+  // Convert real venues to SVG nodes, or fall back to generic Melbourne dots
+  const { nodes, labels } = useMemo(() => {
+    const spots = venues && venues.length >= 2 ? venues.slice(0, 8) : null;
 
-  // Pre-computed route orders (different "attempts" the algorithm tries)
-  const routes = useMemo(() => [
-    [7, 0, 1, 2, 3, 4, 5, 6],  // clockwise from CBD
-    [7, 6, 0, 1, 2, 3, 4, 5],  // start north-west
-    [7, 1, 0, 6, 5, 4, 3, 2],  // counter-clockwise
-    [7, 2, 3, 4, 5, 6, 0, 1],  // start east
-    [7, 5, 6, 0, 1, 2, 3, 4],  // start west
-    [7, 0, 2, 4, 6, 1, 3, 5],  // zigzag
-  ], []);
+    if (!spots) {
+      return {
+        nodes: [
+          { x: 50, y: 15 }, { x: 80, y: 25 }, { x: 90, y: 50 },
+          { x: 72, y: 78 }, { x: 42, y: 85 }, { x: 15, y: 62 },
+          { x: 20, y: 35 }, { x: 52, y: 48 },
+        ],
+        labels: [] as string[],
+      };
+    }
+
+    // Project lat/lng to SVG space with padding
+    const lats = spots.map(v => v.lat);
+    const lngs = spots.map(v => v.lng);
+    const PAD = 12;
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+    const minLng = Math.min(...lngs);
+    const maxLng = Math.max(...lngs);
+    const rangeLat = maxLat - minLat || 0.01;
+    const rangeLng = maxLng - minLng || 0.01;
+
+    return {
+      nodes: spots.map(v => ({
+        x: PAD + ((v.lng - minLng) / rangeLng) * (100 - PAD * 2),
+        // Flip Y: higher lat = lower y in SVG
+        y: PAD + ((maxLat - v.lat) / rangeLat) * (80 - PAD * 2),
+      })),
+      labels: spots.map(v => {
+        // Short name: first 12 chars
+        const name = v.name.length > 14 ? v.name.slice(0, 12) + "..." : v.name;
+        return name;
+      }),
+    };
+  }, [venues]);
+
+  // Generate route permutations
+  const routes = useMemo(() => {
+    const n = nodes.length;
+    const indices = Array.from({ length: n }, (_, i) => i);
+    const perms: number[][] = [];
+
+    // Original order
+    perms.push([...indices]);
+    // Reverse
+    perms.push([...indices].reverse());
+
+    // Nearest-neighbour from different starts
+    for (let start = 0; start < n && perms.length < 6; start++) {
+      const remaining = [...indices];
+      const order: number[] = [];
+      let cur = remaining.splice(start, 1)[0];
+      order.push(cur);
+      while (remaining.length > 0) {
+        let best = 0;
+        let bestDist = Infinity;
+        for (let j = 0; j < remaining.length; j++) {
+          const d = Math.hypot(nodes[remaining[j]].x - nodes[cur].x, nodes[remaining[j]].y - nodes[cur].y);
+          if (d < bestDist) { bestDist = d; best = j; }
+        }
+        cur = remaining.splice(best, 1)[0];
+        order.push(cur);
+      }
+      const key = order.join(",");
+      if (!perms.some(p => p.join(",") === key)) perms.push(order);
+    }
+
+    // Random shuffles
+    for (let i = 0; i < 20 && perms.length < 6; i++) {
+      const shuffled = [...indices].sort(() => Math.random() - 0.5);
+      const key = shuffled.join(",");
+      if (!perms.some(p => p.join(",") === key)) perms.push(shuffled);
+    }
+
+    return perms.slice(0, 6);
+  }, [nodes]);
 
   useEffect(() => {
     const svg = canvasRef.current;
-    if (!svg) return;
+    if (!svg || routes.length === 0 || nodes.length === 0) return;
 
     let animId: number;
-    let startTime = performance.now();
-    const PHASE_DURATION = 2200; // ms per route attempt
-    const DRAW_DURATION = 1600; // ms to draw all lines in a phase
+    const startTime = performance.now();
+    const PHASE_DURATION = 2500;
+    const DRAW_DURATION = 1800;
 
     const animate = (now: number) => {
       const elapsed = now - startTime;
       const phase = Math.floor(elapsed / PHASE_DURATION) % routes.length;
-      const phaseProgress = (elapsed % PHASE_DURATION) / PHASE_DURATION;
       const drawProgress = Math.min(1, (elapsed % PHASE_DURATION) / DRAW_DURATION);
+      const color = ROUTE_ANIM_COLORS[phase % ROUTE_ANIM_COLORS.length];
 
-      const route = routes[phase];
-      const isLastPhase = phase === routes.length - 1;
-
-      // Build SVG content
       let html = "";
 
-      // Draw nodes (dots)
-      for (let i = 0; i < nodes.length; i++) {
-        const n = nodes[i];
-        const isCenter = i === 7;
-        const nodeInRoute = route.indexOf(i);
-        const nodeProgress = nodeInRoute >= 0 ? nodeInRoute / (route.length - 1) : -1;
-        const visible = nodeProgress <= drawProgress;
-
-        if (visible) {
-          const scale = isCenter ? 1.3 : 1;
-          const opacity = isCenter ? 1 : (0.5 + drawProgress * 0.5);
-          const r = isCenter ? 4.5 : 3;
-
-          // Glow for center node
-          if (isCenter) {
-            html += `<circle cx="${n.x}" cy="${n.y}" r="10" fill="oklch(0.65 0.16 255 / 0.12)" class="route-anim-pulse" />`;
-          }
-
-          html += `<circle cx="${n.x}" cy="${n.y}" r="${r * scale}" fill="oklch(0.65 0.16 255 / ${opacity})" />`;
-
-          // Small label dot ring for visited nodes
-          if (!isCenter && nodeProgress < drawProgress) {
-            html += `<circle cx="${n.x}" cy="${n.y}" r="${r * scale + 2.5}" fill="none" stroke="oklch(0.65 0.16 255 / ${opacity * 0.3})" stroke-width="1" />`;
-          }
+      // Draw all faded previous routes as ghost lines
+      for (let pi = 0; pi < routes.length; pi++) {
+        if (pi === phase) continue;
+        const ghostAlpha = 0.06;
+        const r = routes[pi];
+        if (!r) continue;
+        for (let i = 0; i < r.length - 1; i++) {
+          const from = nodes[r[i]];
+          const to = nodes[r[i + 1]];
+          html += `<line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" stroke="oklch(0.65 0.16 255 / ${ghostAlpha})" stroke-width="1" stroke-linecap="round" />`;
         }
       }
 
-      // Draw connecting lines
+      // Draw current route (animated)
+      const route = routes[phase % Math.max(1, routes.length)];
+      if (!route) { animId = requestAnimationFrame(animate); return; }
       for (let i = 0; i < route.length - 1; i++) {
-        const segProgress = (drawProgress * (route.length - 1) - i);
+        const segProgress = drawProgress * (route.length - 1) - i;
         if (segProgress <= 0) continue;
 
         const from = nodes[route[i]];
@@ -883,21 +924,51 @@ function RouteAnimation({ className }: { className?: string }) {
         const x2 = from.x + (to.x - from.x) * t;
         const y2 = from.y + (to.y - from.y) * t;
 
-        const isFinal = isLastPhase && phaseProgress > 0.8;
-        const lineOpacity = isFinal ? 0.7 : (0.2 + t * 0.3);
-        const lineColor = isFinal
-          ? `oklch(0.7 0.18 150 / ${lineOpacity})`
-          : `oklch(0.65 0.16 255 / ${lineOpacity})`;
+        html += `<line x1="${from.x}" y1="${from.y}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-opacity="0.6" />`;
 
-        html += `<line x1="${from.x}" y1="${from.y}" x2="${x2}" y2="${y2}" stroke="${lineColor}" stroke-width="${isFinal ? 2.5 : 1.5}" stroke-linecap="round" />`;
-
-        // Animated travel dot along the line
-        if (t > 0.1 && t < 0.95) {
-          const dotT = (t * 3) % 1;
+        // Travel dot
+        if (t > 0.15 && t < 0.9) {
+          const dotT = (t * 2.5) % 1;
           const dx = from.x + (to.x - from.x) * dotT;
           const dy = from.y + (to.y - from.y) * dotT;
-          html += `<circle cx="${dx}" cy="${dy}" r="2" fill="oklch(0.8 0.16 255 / 0.8)" />`;
+          html += `<circle cx="${dx}" cy="${dy}" r="2.5" fill="${color}" opacity="0.9" />`;
         }
+      }
+
+      // Draw nodes + labels
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i];
+        const nodeIdx = route.indexOf(i);
+        const reached = nodeIdx >= 0 && nodeIdx / (route.length - 1) <= drawProgress;
+        const isFirst = nodeIdx === 0;
+
+        // Glow ring for first node
+        if (isFirst) {
+          html += `<circle cx="${n.x}" cy="${n.y}" r="9" fill="${color}" opacity="0.1" class="route-anim-pulse" />`;
+        }
+
+        // Dot
+        const r = isFirst ? 4.5 : 3.5;
+        const dotColor = reached ? color : "oklch(0.65 0.16 255 / 0.3)";
+        html += `<circle cx="${n.x}" cy="${n.y}" r="${r}" fill="${dotColor}" />`;
+
+        // Ring for reached nodes
+        if (reached && !isFirst) {
+          html += `<circle cx="${n.x}" cy="${n.y}" r="${r + 2.5}" fill="none" stroke="${color}" stroke-width="1" opacity="0.3" />`;
+        }
+
+        // Label
+        if (labels[i]) {
+          const labelOpacity = reached ? 0.8 : 0.35;
+          html += `<text x="${n.x}" y="${n.y + (n.y > 60 ? -7 : 10)}" text-anchor="middle" font-size="3.2" font-family="system-ui, sans-serif" font-weight="${reached ? "600" : "400"}" fill="oklch(0.35 0.05 255 / ${labelOpacity})">${labels[i]}</text>`;
+        }
+      }
+
+      // Phase indicator dots at the bottom
+      for (let i = 0; i < routes.length; i++) {
+        const dotX = 50 - (routes.length - 1) * 3 + i * 6;
+        const isCurrent = i === phase;
+        html += `<circle cx="${dotX}" cy="92" r="${isCurrent ? 2 : 1.2}" fill="${isCurrent ? ROUTE_ANIM_COLORS[i % ROUTE_ANIM_COLORS.length] : "oklch(0.65 0.16 255 / 0.2)"}" />`;
       }
 
       svg.innerHTML = html;
@@ -906,14 +977,14 @@ function RouteAnimation({ className }: { className?: string }) {
 
     animId = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(animId);
-  }, [nodes, routes]);
+  }, [nodes, labels, routes, ROUTE_ANIM_COLORS]);
 
   return (
     <svg
       ref={canvasRef}
-      viewBox="0 0 100 100"
+      viewBox="0 0 100 96"
       className={cn("route-build-anim", className)}
-      style={{ width: "100%", maxWidth: 280, aspectRatio: "1" }}
+      style={{ width: "100%", maxWidth: 300, aspectRatio: "100/96" }}
     />
   );
 }
@@ -1365,6 +1436,7 @@ export function PlannerShell() {
           startLocation={startLocation}
           travelMode={travelMode}
           colorScheme={resolvedTheme === "dark" ? "DARK" : "LIGHT"}
+          isPlanning={isPlanning}
         />
       </div>
 
@@ -1548,7 +1620,7 @@ export function PlannerShell() {
               </>
             ) : isPlanning ? (
               <div className="grid gap-4 py-6 justify-items-center text-center">
-                <RouteAnimation />
+                <RouteAnimation venues={filteredVenues} />
                 <div className="space-y-2">
                   <h2 className="heading-serif text-lg">Building your route</h2>
                   <p className="text-[0.85rem] text-muted-foreground leading-[1.7] max-w-[260px]">
@@ -1879,7 +1951,7 @@ export function PlannerShell() {
                   </>
                 ) : isPlanning ? (
                   <div className="grid gap-3 py-4 justify-items-center text-center">
-                    <RouteAnimation className="max-w-[200px]" />
+                    <RouteAnimation venues={filteredVenues} className="max-w-[200px]" />
                     <p className="text-[0.85rem] text-muted-foreground">Building your route...</p>
                   </div>
                 ) : (

@@ -1,5 +1,5 @@
 import { anthropic } from "@ai-sdk/anthropic";
-import { generateText, stepCountIs, tool } from "ai";
+import { generateText } from "ai";
 import { z } from "zod";
 
 import { getDirections } from "@/lib/directions";
@@ -33,135 +33,144 @@ const itineraryOutputSchema = z.object({
 
 /* ── planner system prompt ──────────────────────────────────── */
 
-const PLANNER_SYSTEM = `You are a Melbourne route planner agent. Your job is to build the best possible day route from a database of curated Melbourne spots.
-
-## Your process
-1. First, call searchSpots to find candidates matching the user's vibe.
-2. Review the results. Think about what mix of spots makes a great day.
-3. Plan the optimal stop order:
-   a. Start from the user's startLocation.
-   b. Pick the nearest unvisited spot as the first stop.
-   c. From each stop, pick the nearest remaining spot — like a nearest-neighbour route.
-   d. This avoids zigzagging across the city.
-4. Call getDirections from the startLocation to the first stop, then between each consecutive pair of stops, to get real travel times.
-5. If a leg is too long (>30 min walking, >20 min driving), consider swapping or reordering.
-6. Once you're happy, call finalizePlan with your final ordered selection.
-
-## Planning rules
-- ALWAYS order stops to minimise total travel time from the startLocation. The first stop should be the closest to the start.
-- Keep the route geographically compact — follow a logical path through nearby suburbs, don't bounce around.
-- Respect visit windows — don't schedule a brunch spot at 5 PM.
-- Mix up stop kinds when the user's vibe calls for variety.
-- If the user says "lowkey" or "hidden", favor spots with high hiddenGem signals.
-- If they want "viral" or "trending", favor high viral signals.
-- Infer a sensible start time: brunch/coffee → 9:30 AM, lunch → 11:30 AM, dinner/date → 5:30 PM, sunset → 3:30 PM.
-- Each stop's duration should use the spot's idealVisitMinutes.
-
-## Important
-- You can call searchSpots multiple times with different queries to find the right mix.
-- You MUST call getDirections from the startLocation to the first stop AND between all consecutive stops to validate travel times.
-- You MUST call finalizePlan exactly once at the end with your final plan.`;
-
-/* ── build itinerary using Gemini agent ─────────────────────── */
+/* ── build itinerary programmatically ─────────────────────── */
 
 export async function buildItinerary(request: PlanRequest): Promise<ItineraryResponse> {
-  const allSpots = await getAllSpots();
-  const spotsById = new Map(allSpots.map((s) => [s.id, s]));
+  console.log("[plan] Starting programmatic route build:", request.query);
 
-  // Collect directions data as the agent calls getDirections
-  const directionsCache: Record<string, { distanceKm: number; durationMinutes: number; summary: string }> = {};
-
-  const { toolResults } = await generateText({
-    model: anthropic("claude-haiku-4-5-20251001"),
-    system: PLANNER_SYSTEM,
-    prompt: JSON.stringify({
-      userRequest: {
-        query: request.query,
-        startLocation: request.startLocation || "CBD",
-        travelMode: request.travelMode,
-        maxStops: request.maxStops,
-      },
-      totalSpotsInDatabase: allSpots.length,
-    }),
-    tools: {
-      searchSpots: tool({
-        description: "Search the Melbourne spots database. Returns spots ranked by relevance to the query. You can filter by kind (food/lookout/fashion) and area.",
-        inputSchema: z.object({
-          query: z.string().describe("Search query — vibe, cuisine, activity, etc."),
-          area: z.string().optional().describe("Optional area filter like 'Fitzroy', 'CBD', 'South Melbourne'"),
-          kind: z.enum(["food", "lookout", "fashion"]).optional().describe("Optional kind filter"),
-          maxResults: z.number().optional().default(8).describe("Max results to return"),
-        }),
-        execute: async (args) => {
-          let fullQuery = args.query;
-          if (args.area) fullQuery += ` ${args.area}`;
-          if (args.kind) fullQuery += ` ${args.kind}`;
-
-          const results = await searchSpots({
-            query: fullQuery,
-            startLocation: args.area,
-            maxResults: args.maxResults ?? 8,
-          });
-
-          return results.map((s) => ({
-            id: s.id,
-            name: s.name,
-            kind: s.kind,
-            area: s.area,
-            suburb: s.suburb,
-            address: s.address,
-            categories: s.categories,
-            vibeTags: s.vibeTags,
-            description: s.description,
-            priceBand: s.priceBand,
-            idealVisitMinutes: s.idealVisitMinutes,
-            visitWindows: s.visitWindows,
-            signals: s.signals,
-            socialProof: { mentions: s.socialProof.mentions, creatorCount: s.socialProof.creatorCount },
-            matchScore: s.matchScore,
-          }));
-        },
-      }),
-
-      getDirections: tool({
-        description: "Get real walking/driving/transit directions between two addresses using Google Maps. Use this to validate travel times between planned stops.",
-        inputSchema: z.object({
-          originAddress: z.string().describe("Starting address or place name"),
-          destinationAddress: z.string().describe("Destination address or place name"),
-          travelMode: z.enum(["walking", "driving", "transit"]).describe("Travel mode"),
-        }),
-        execute: async (args) => {
-          const result = await getDirections(args);
-          const cacheKey = `${args.originAddress}→${args.destinationAddress}`;
-          directionsCache[cacheKey] = {
-            distanceKm: result.distanceKm,
-            durationMinutes: result.durationMinutes,
-            summary: result.summary,
-          };
-          return result;
-        },
-      }),
-
-      finalizePlan: tool({
-        description: "Submit your final route plan. Call this exactly once when you are satisfied with the route.",
-        inputSchema: itineraryOutputSchema,
-        execute: async () => {
-          return { status: "plan_received" };
-        },
-      }),
-    },
-    stopWhen: stepCountIs(8),
+  // 1. Search for matching spots
+  const candidates = await searchSpots({
+    query: `${request.query} ${request.startLocation || "Melbourne"}`,
+    startLocation: request.startLocation,
+    maxResults: request.maxStops * 3,
   });
 
-  // Extract the finalizePlan call from tool results
-  const finalizeCall = toolResults.find((r) => r.toolName === "finalizePlan");
-
-  if (!finalizeCall) {
-    throw new Error("Gemini planner did not call finalizePlan");
+  if (candidates.length === 0) {
+    throw new Error("No matching spots found for your request");
   }
 
-  const plan = finalizeCall.input as z.infer<typeof itineraryOutputSchema>;
+  const spotsById = new Map(candidates.map((s) => [s.id, s]));
+
+  // 2. Pick the top N spots via nearest-neighbour ordering
+  const picked: Spot[] = [];
+  const remaining = [...candidates.slice(0, Math.max(request.maxStops * 2, 8))];
+
+  // Start from a reasonable center if no start location coords
+  let currentLat = -37.8136; // Melbourne CBD default
+  let currentLng = 144.9631;
+
+  for (let i = 0; i < request.maxStops && remaining.length > 0; i++) {
+    // Find nearest unvisited spot
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    for (let j = 0; j < remaining.length; j++) {
+      const s = remaining[j];
+      const d = haversine(currentLat, currentLng, s.coordinates.lat, s.coordinates.lng);
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = j;
+      }
+    }
+    const chosen = remaining.splice(bestIdx, 1)[0];
+    picked.push(chosen);
+    currentLat = chosen.coordinates.lat;
+    currentLng = chosen.coordinates.lng;
+  }
+
+  // 3. Fetch real directions between consecutive stops
+  const directionsCache: Record<string, { distanceKm: number; durationMinutes: number; summary: string }> = {};
+  for (let i = 0; i < picked.length; i++) {
+    const originAddr = i === 0
+      ? (request.startLocation || "Melbourne CBD")
+      : picked[i - 1].address;
+    const destAddr = picked[i].address;
+    try {
+      const result = await getDirections({
+        originAddress: originAddr,
+        destinationAddress: destAddr,
+        travelMode: request.travelMode,
+      });
+      directionsCache[`${originAddr}→${destAddr}`] = {
+        distanceKm: result.distanceKm,
+        durationMinutes: result.durationMinutes,
+        summary: result.summary,
+      };
+    } catch {
+      // Haversine fallback
+    }
+  }
+
+  // 4. Compute arrival/departure times
+  const startHour = request.query.match(/dinner|date/i) ? 17.5
+    : request.query.match(/lunch/i) ? 11.5
+    : request.query.match(/sunset/i) ? 15.5
+    : 9.5;
+
+  let currentMinutes = startHour * 60;
+  const stops: z.infer<typeof itineraryOutputSchema>["stops"] = [];
+
+  for (let i = 0; i < picked.length; i++) {
+    const spot = picked[i];
+    const originAddr = i === 0 ? (request.startLocation || "Melbourne CBD") : picked[i - 1].address;
+    const cached = directionsCache[`${originAddr}→${spot.address}`];
+    const travelMin = cached?.durationMinutes ?? 10;
+
+    currentMinutes += i === 0 ? 0 : travelMin;
+    const arrivalTime = formatTime(currentMinutes);
+    const departureTime = formatTime(currentMinutes + spot.idealVisitMinutes);
+
+    stops.push({
+      spotId: spot.id,
+      reason: `Top match for "${request.query}" — ${spot.vibeTags.slice(0, 2).join(", ")} vibe in ${spot.area}`,
+      arrivalTime,
+      departureTime,
+    });
+
+    currentMinutes += spot.idealVisitMinutes;
+  }
+
+  // 5. Generate theme & summary with a lightweight Claude call
+  let dayTheme = `${request.query.slice(0, 40)} day`;
+  let summary = `A ${picked.length}-stop ${request.travelMode} route through ${[...new Set(picked.map(s => s.area))].join(", ")}.`;
+
+  try {
+    const { text } = await generateText({
+      model: anthropic("claude-haiku-4-5-20251001"),
+      prompt: `Given these Melbourne stops: ${picked.map(s => s.name).join(", ")} for a "${request.query}" trip.
+Reply with EXACTLY two lines, nothing else:
+Line 1: A catchy route name, max 6 words, no markdown, no hashtags
+Line 2: A one-sentence summary of the route`,
+      maxOutputTokens: 60,
+    });
+    const lines = text.trim().split("\n").map(s => s.replace(/^#+\s*/, "").trim()).filter(Boolean);
+    if (lines[0]) dayTheme = lines[0];
+    if (lines[1]) summary = lines[1];
+  } catch {
+    // Use defaults
+  }
+
+  const backupIds = remaining.slice(0, 3).map(s => s.id);
+
+  const plan = { dayTheme, summary, routeRationale: "", stops, backupSpotIds: backupIds };
   return assemblePlan(plan, request, spotsById, directionsCache);
+}
+
+function haversine(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) *
+    Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function formatTime(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = Math.round(minutes % 60);
+  const period = h >= 12 ? "PM" : "AM";
+  const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
+  return `${h12}:${String(m).padStart(2, "0")} ${period}`;
 }
 
 /* ── assemble the final ItineraryResponse ───────────────────── */

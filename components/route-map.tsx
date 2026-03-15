@@ -31,6 +31,7 @@ type RouteMapProps = {
   startLocation: string;
   travelMode: TravelMode;
   colorScheme?: "DARK" | "LIGHT";
+  isPlanning?: boolean;
 };
 
 function travelModeToGoogle(mode: TravelMode): google.maps.TravelMode {
@@ -117,6 +118,80 @@ function DirectionsRenderer({
       renderer.setMap(null);
     };
   }, [map, routesLib, stops, startLocation, travelMode]);
+
+  return null;
+}
+
+/** During planning: show a single preview route through the filtered venues
+ *  using nearest-neighbour ordering. Uses lat/lng to avoid geocoding errors. */
+function RoutePlanningPreview({
+  venues,
+  travelMode,
+}: {
+  venues: Venue[];
+  startLocation: string;
+  travelMode: TravelMode;
+}) {
+  const map = useMap();
+  const routesLib = useMapsLibrary("routes");
+  const rendererRef = useRef<google.maps.DirectionsRenderer | null>(null);
+
+  useEffect(() => {
+    if (!map || !routesLib || venues.length < 2) {
+      if (rendererRef.current) { rendererRef.current.setMap(null); rendererRef.current = null; }
+      return;
+    }
+
+    // Order venues by nearest-neighbour starting from the first
+    const ordered: Venue[] = [];
+    const remaining = [...venues];
+    let current = remaining.shift()!;
+    ordered.push(current);
+    while (remaining.length > 0) {
+      let nearest = 0;
+      let nearestDist = Infinity;
+      for (let j = 0; j < remaining.length; j++) {
+        const d = Math.hypot(remaining[j].lat - current.lat, remaining[j].lng - current.lng);
+        if (d < nearestDist) { nearestDist = d; nearest = j; }
+      }
+      current = remaining.splice(nearest, 1)[0];
+      ordered.push(current);
+    }
+
+    const renderer = new routesLib.DirectionsRenderer({
+      map,
+      suppressMarkers: true,
+      polylineOptions: {
+        strokeColor: "#4f8cf9",
+        strokeWeight: 4,
+        strokeOpacity: 0.5,
+        zIndex: 5,
+      },
+    });
+    rendererRef.current = renderer;
+
+    const service = new routesLib.DirectionsService();
+    const origin = new google.maps.LatLng(ordered[0].lat, ordered[0].lng);
+    const dest = new google.maps.LatLng(ordered[ordered.length - 1].lat, ordered[ordered.length - 1].lng);
+    const waypoints = ordered.slice(1, -1).map(v => ({
+      location: new google.maps.LatLng(v.lat, v.lng),
+      stopover: true,
+    }));
+
+    service.route(
+      { origin, destination: dest, waypoints, travelMode: travelModeToGoogle(travelMode) },
+      (result, status) => {
+        if (status === google.maps.DirectionsStatus.OK && result) {
+          renderer.setDirections(result);
+        }
+      }
+    );
+
+    return () => {
+      renderer.setMap(null);
+      rendererRef.current = null;
+    };
+  }, [map, routesLib, venues, travelMode]);
 
   return null;
 }
@@ -533,7 +608,8 @@ function GoogleMapInner({
   onDeselectVenue,
   startLocation,
   travelMode,
-  colorScheme = "DARK"
+  colorScheme = "DARK",
+  isPlanning = false
 }: RouteMapProps) {
   const hasStops = stops.length > 0;
   const hasVenues = venues.length > 0;
@@ -657,6 +733,15 @@ function GoogleMapInner({
       )}
 
       {hasStops && <DirectionsRenderer stops={stops} startLocation={startLocation} travelMode={travelMode} />}
+
+      {/* During planning: show a preview route on the map */}
+      {isPlanning && !hasStops && hasVenues && venues.length >= 2 && (
+        <RoutePlanningPreview
+          venues={venues}
+          startLocation={startLocation}
+          travelMode={travelMode}
+        />
+      )}
 
       {/* Hide all other markers when directions are active */}
       {!showDirections && (
