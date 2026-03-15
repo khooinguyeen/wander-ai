@@ -87,12 +87,11 @@ function buildDocument(venue: Venue): string {
 }
 
 function toMetadata(venue: Venue) {
-  const { description: _desc, ...rest } = venue;
   return {
-    ...rest,
-    price_level: rest.price_level ?? -1,
-    google_rating: rest.google_rating ?? -1,
-    google_rating_count: rest.google_rating_count ?? -1,
+    ...venue,
+    price_level: venue.price_level ?? -1,
+    google_rating: venue.google_rating ?? -1,
+    google_rating_count: venue.google_rating_count ?? -1,
   };
 }
 
