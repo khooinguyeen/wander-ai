@@ -14,6 +14,7 @@
     "@ai-sdk/google": "^2.0.62",
     "@ai-sdk/provider-utils": "^4.0.19",
     "@ai-sdk/react": "^3.0.118",
+    "@chroma-core/default-embed": "^0.1.9",
     "@googlemaps/markerclusterer": "^2.6.2",
     "@radix-ui/react-scroll-area": "^1.2.10",
     "@radix-ui/react-tabs": "^1.1.13",
