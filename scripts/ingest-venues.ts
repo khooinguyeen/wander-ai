@@ -75,6 +75,55 @@ function isValid(venue: Venue): boolean {
   return true;
 }
 
+const EMBED_BATCH_SIZE = 100;
+const GOOGLE_API_KEY = process.env.GOOGLE_GENERATIVE_AI_API_KEY!;
+const EMBED_MODEL = "gemini-embedding-001";
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function embedBatch(texts: string[]): Promise<number[][]> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${EMBED_MODEL}:batchEmbedContents?key=${GOOGLE_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          requests: texts.map((text) => ({
+            model: `models/${EMBED_MODEL}`,
+            content: { parts: [{ text }] },
+          })),
+        }),
+      }
+    );
+    if (resp.status === 429) {
+      const wait = 30_000;
+      console.log(`  Rate limited, waiting ${wait / 1000}s...`);
+      await sleep(wait);
+      continue;
+    }
+    if (!resp.ok) {
+      const err = await resp.text();
+      throw new Error(`Embedding API error ${resp.status}: ${err}`);
+    }
+    const data = await resp.json() as { embeddings: { values: number[] }[] };
+    return data.embeddings.map((e) => e.values);
+  }
+  throw new Error("Embedding failed after 3 retries");
+}
+
+async function embedInBatches(docs: string[]): Promise<number[][]> {
+  const allEmbeddings: number[][] = [];
+  for (let i = 0; i < docs.length; i += EMBED_BATCH_SIZE) {
+    if (i > 0) await sleep(61_000); // wait 61s between batches to stay under 100 req/min
+    const batch = docs.slice(i, i + EMBED_BATCH_SIZE);
+    const embeddings = await embedBatch(batch);
+    allEmbeddings.push(...embeddings);
+    console.log(`  Embedded ${Math.min(i + EMBED_BATCH_SIZE, docs.length)}/${docs.length}`);
+  }
+  return allEmbeddings;
+}
+
 function buildDocument(venue: Venue): string {
   return [
     venue.name,
@@ -151,10 +200,13 @@ async function seed() {
 
   // 4. Add new venues
   if (toAdd.length > 0) {
+    const addDocs = toAdd.map(buildDocument);
+    const addEmbeddings = await embedInBatches(addDocs);
     await collection.add({
-      ids:       toAdd.map((v) => v.google_place_id),
-      documents: toAdd.map(buildDocument),
-      metadatas: toAdd.map(toMetadata),
+      ids:        toAdd.map((v) => v.google_place_id),
+      documents:  addDocs,
+      embeddings: addEmbeddings,
+      metadatas:  toAdd.map(toMetadata),
     });
     console.log(`✅ Added ${toAdd.length} new venues`);
   }
@@ -181,10 +233,13 @@ async function seed() {
       ),
     }));
 
+    const updateDocs = mergedVenues.map(buildDocument);
+    const updateEmbeddings = await embedInBatches(updateDocs);
     await collection.update({
-      ids:       mergedVenues.map((v) => v.google_place_id),
-      documents: mergedVenues.map(buildDocument),
-      metadatas: mergedVenues.map(toMetadata),
+      ids:        mergedVenues.map((v) => v.google_place_id),
+      documents:  updateDocs,
+      embeddings: updateEmbeddings,
+      metadatas:  mergedVenues.map(toMetadata),
     });
     console.log(`🔄 Updated ${toUpdate.length} existing venues (source_urls merged)`);
   }

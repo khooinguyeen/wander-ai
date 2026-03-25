@@ -21,7 +21,8 @@ declare module "chromadb" {
         documents: Array<string | null>;
       }>;
       query(args: {
-        queryTexts: string[];
+        queryTexts?: string[];
+        queryEmbeddings?: number[][];
         nResults: number;
         include?: string[];
       }): Promise<{

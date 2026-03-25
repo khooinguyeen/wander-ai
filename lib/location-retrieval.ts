@@ -160,6 +160,30 @@ function parseEnvBoolean(name: string, defaultValue: boolean): boolean {
   return ["1", "true", "yes", "y", "on"].includes(raw.trim().toLowerCase());
 }
 
+const EMBED_MODEL = "gemini-embedding-001";
+
+async function embedText(text: string): Promise<number[]> {
+  const apiKey = getEnv("GOOGLE_GENERATIVE_AI_API_KEY");
+  if (!apiKey) throw new Error("Missing GOOGLE_GENERATIVE_AI_API_KEY");
+  const resp = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${EMBED_MODEL}:embedContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: `models/${EMBED_MODEL}`,
+        content: { parts: [{ text }] },
+      }),
+    }
+  );
+  if (!resp.ok) {
+    const err = await resp.text();
+    throw new Error(`Embedding API error ${resp.status}: ${err}`);
+  }
+  const data = await resp.json() as { embedding: { values: number[] } };
+  return data.embedding.values;
+}
+
 function createChromaClient(): ChromaClient {
   const apiKey = getEnv("CHROMA_API_KEY")?.trim();
   const tenant = getEnv("CHROMA_TENANT")?.trim();
@@ -253,8 +277,10 @@ export async function retrieveLocationsFromChroma(
   const client = createChromaClient();
   const collection = await client.getCollection({ name: collectionName });
 
+  const embedding = await embedText(queryText);
+
   const raw = await collection.query({
-    queryTexts: [queryText],
+    queryEmbeddings: [embedding],
     nResults: Math.max(topK * 4, 20),
     include: ["metadatas", "distances"],
   });

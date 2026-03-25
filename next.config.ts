@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   typedRoutes: true,
-  serverExternalPackages: ["chromadb", "@chroma-core/default-embed", "onnxruntime-node"],
+  serverExternalPackages: ["chromadb"],
   webpack: (config, { webpack }) => {
     // chromadb does a dynamic import("@chroma-core/default-embed") which pulls in
     // onnxruntime-node (a native addon). Webpack can't bundle native addons, so the
